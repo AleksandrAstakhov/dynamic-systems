@@ -293,7 +293,7 @@ class GRANDBlock(nn.Module):
         self.num_nodes = num_nodes
         self.num_heads = num_heads
 
-        adj = torch.ones((num_nodes, num_nodes)) - torch.eye(num_nodes)  # без петель
+        adj = torch.ones((num_nodes, num_nodes)) - torch.eye(num_nodes)
         edge_index, _ = torch_geometric.utils.dense_to_sparse(adj)
 
         self.edge_index = edge_index
@@ -334,23 +334,133 @@ class DiffusionRegressor(nn.Module):
     def forward(self, x, time_to_integrate):
         z = self.encoder(x, time_to_integrate)
 
-        # U, S, Vh = torch.linalg.svd(z, full_matrices=False)
-
-        # k = min(self.rank, S.shape[-1])
-        # U_k = U[..., :k]
-        # S_k = S[..., :k]
-        # Vh_k = Vh[..., :k, :]
-
-        # z_reduced = U_k @ torch.diag_embed(S_k) @ Vh_k
-
         x_hat = self.decoder(z, time_to_integrate)
 
         return z, x_hat
     
+def lorenz_attractor(y0=(0.1,0.0,0.0), t1=50.0, dt=0.01, sigma=10.0, rho=28.0, beta=8/3):
+    y0 = np.array(y0, dtype=float)
+    t = np.arange(0, t1 + dt, dt)
+    traj = np.zeros((len(t), 3))
+    traj[0] = y0
+
+    def f(y):
+        x, yv, z = y
+        return np.array([sigma*(yv-x), x*(rho-z)-yv, x*yv - beta*z], dtype=float)
+
+    for i in range(len(t)-1):
+        y = traj[i]
+        k1 = f(y)
+        k2 = f(y + 0.5*dt*k1)
+        k3 = f(y + 0.5*dt*k2)
+        k4 = f(y + dt*k3)
+        traj[i+1] = y + (dt/6.0)*(k1 + 2*k2 + 2*k3 + k4)
+
+    return traj
+
+def nonlinear_observation(traj: np.ndarray) -> np.ndarray:
+
+    x, y, z = traj[:,0], traj[:,1], traj[:,2]
+
+    x_nl = np.tanh(x + y**2 - z)
+    y_nl = np.sin(y + z**2 - x)
+    z_nl = np.tanh(z + x**2 - y)
+
+    return np.stack([x_nl, y_nl, z_nl], axis=1)
+
+def multivariate_delay_embedding(traj_nl: np.ndarray, d: int, tau: int) -> np.ndarray:
+    """
+    Строит delay embedding для многомерного сигнала и конкатенирует все модальности.
+
+    Параметры:
+        traj_nl: np.ndarray, shape (T, num_features) — нелинейно преобразованная траектория
+        d: int — размер вложения (число задержек)
+        tau: int — шаг задержки (lag)
+
+    Возвращает:
+        np.ndarray, shape (N, num_features * d), где N = T - (d-1)*tau
+    """
+    T, num_features = traj_nl.shape
+    N = T - (d-1)*tau
+    if N <= 0:
+        raise ValueError("Слишком большая размерность вложения или задержка")
+    
+    embeddings = []
+    for i in range(num_features):
+        signal = traj_nl[:, i]
+        emb_i = np.zeros((N, d))
+        for j in range(d):
+            emb_i[:, j] = signal[j*tau : j*tau + N]
+        embeddings.append(emb_i)
+    
+    emb_all = np.concatenate(embeddings, axis=1)
+    return emb_all
     
 
+from torch.utils.data.Dataset import TensorDataset, DataLoader
+import torch.optim as optim
     
 if __name__ == "__main__":
-    E, X = prepare_dataset()
+    Y = torch.Tensor(lorenz_attractor().T)
+    X = multivariate_delay_embedding(nonlinear_observation(Y), 9, 25)
+
+    dt = 0.01
+    window_sec = 1
+
+    window_size = int(window_sec / dt)
+    T, num_features = X.shape
+    num_windows = T // window_size
+
+    X_trimmed = X[:num_windows * window_size]
+    
+    X_windows = torch.tensor(X_trimmed.reshape(num_windows, window_size, num_features)).transpose(1, 2)
+
+    model = DiffusionRegressor(
+        node_dim=window_size,
+        num_nodes=num_features,
+        num_heads=4,
+        out_dim=num_features,
+    )
+
+    epochs = 200
+    for _ in tqdm(range(epochs))
+
+        loss = torch.Tensor([0], requires_grad=True)
+
+        optimizer = optim.Adam(model.parameters(), lr=0.001)
+
+        latents = []
+
+        for window in X_windows
+            z, x_hat = model(window, 10, (0, 10, 100))
+            latents.append(z)
+            loss = loss + nn.MSELoss()(x_hat, window)
+
+        Z = torch.cat(latents, dim=0)
+
+        U, S, Vh = torch.linalg.svd(Z, full_matrices=False)
+
+        k = 3
+        U_k = U[..., :k]
+        S_k = S[..., :k]
+        Vh_k = Vh[..., :k, :]
+
+        z_reduced = U_k @ torch.diag_embed(S_k) @ Vh_k
+
+        loss = loss + nn.MSELoss()(z_reduced, Y)
+
+        loss.beckward()
+    
+
+
+
+
+
+
+
+
+
+
+
 
 
