@@ -92,7 +92,7 @@ class GRAND(nn.Module):
 
     def forward(self, x, t):
         z = odeint(self.grand_encoder, x, t, method="rk4")[-1]
-        x_hat = odeint(self.grand_decoder, x, t, method="rk4")[-1]
+        x_hat = odeint(self.grand_decoder, z, t, method="rk4")[-1]
 
         return z, x_hat
 
