@@ -23,6 +23,7 @@ class SSSPformer(nn.Module):
     num_heads: int
     head_dim: int
     mlp_dim: int
+    vae_latent: int 
     latent_dim: int
     num_layers: int
 
@@ -40,7 +41,7 @@ class SSSPformer(nn.Module):
             in_axes=(1, 0),
             out_axes=1,
             axis_size=C,
-        )(latent_dim=self.latent_dim, input_dim=D)(x_, jax.random.split(key, C))
+        )(latent_dim=self.vae_latent, input_dim=D)(x_, jax.random.split(key, C))
 
         recon_reshaped = recon.reshape(B, S, C, -1)
 
@@ -203,7 +204,7 @@ if __name__ == "__main__":
     print(f"Train: {X_train.shape}, {y_train.shape}")
     print(f"Test: {X_test.shape}, {y_test.shape}")
 
-    model = SSSPformer(4, 8, 64, 64, 3)
+    model = SSSPformer(4, 8, 64, 4, 64, 3)
     batch_size = 32
     train_model(
         model,
