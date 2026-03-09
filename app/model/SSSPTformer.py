@@ -37,7 +37,7 @@ class SSSPformer(nn.Module):
             VAE,
             variable_axes={"params": 0},
             split_rngs={"params": True},
-            in_axes=1,
+            in_axes=(1, 0),
             out_axes=1,
             axis_size=C,
         )(latent_dim=self.latent_dim, input_dim=D)(x_, jax.random.split(key, C))
@@ -68,9 +68,8 @@ class SSSPformer(nn.Module):
         }
 
 
-def loss_fn(params: dict, model: nn.Module, x: Tensor, y: Tensor):
-    base_key, new_key = jax.random.split(base_key)
-    out = model.apply(params, x, new_key)
+def loss_fn(params: dict, model: nn.Module, x, y, key):
+    out = model.apply(params, x, key)
 
     prediction = out["prediction"]
     recnstruction = out["recnstruction"]
@@ -87,21 +86,24 @@ def loss_fn(params: dict, model: nn.Module, x: Tensor, y: Tensor):
 
 
 def train_step(params, opt_state, x, y, optimizer):
-    loss, grads = jax.value_and_grad(loss_fn)(params, x, y)
+    global base_key
+    base_key, new_key = jax.random.split(base_key)
+    loss, grads = jax.value_and_grad(loss_fn)(params, model, x, y, new_key)
     updates, opt_state = optimizer.update(grads, opt_state)
     params = optax.apply_updates(params, updates)
     return params, opt_state, loss
 
 
 def train_model(model: nn.Module, dataloader: DataLoader, dummy_x: jnp.Array, epochs):
-    key = jax.random.key(0)
-    params = model.init(key, dummy_x)
+    global base_key
+    base_key, new_key = jax.random.split(base_key)
+    params = model.init(base_key, dummy_x, new_key)
     optimizer = optax.adam(learning_rate=1e-3)
     opt_state = optimizer.init(params)
 
-    for i in tqdm(epochs):
+    for i in tqdm(range(epochs)):
         losses = []
-        for x, y in dataloader:
+        for x, y in tqdm(dataloader):
             params, opt_state, loss = train_step(params, opt_state, x, y, optimizer)
             losses.append(loss)
         print(f"Epoch {i + 1}, Loss: ", jnp.array(losses).mean())

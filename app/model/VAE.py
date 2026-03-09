@@ -15,6 +15,8 @@ class Encoder(nn.Module):
     def __call__(self, x):
         x = nn.Dense(self.latent_dim)(x)
         x = nn.relu(x)
+        x = nn.Dense(self.latent_dim)(x)
+        x = nn.relu(x)
 
         mu = nn.Dense(self.latent_dim)(x)
         logvar = nn.Dense(self.latent_dim)(x)
@@ -27,14 +29,14 @@ class Encoder(nn.Module):
 # -------------------------
 class Decoder(nn.Module):
     latent_dim: int
-    output_dim: int
+    out_dim: int
 
     @nn.compact
     def __call__(self, z):
         z = nn.Dense(self.latent_dim)(z)
         z = nn.relu(z)
 
-        z = nn.Dense(self.output_dim)(z)
+        z = nn.Dense(self.out_dim)(z)
 
         return z
 
@@ -46,19 +48,17 @@ class VAE(nn.Module):
     latent_dim: int
     input_dim: int
 
-    def setup(self):
-        self.encoder = Encoder(self.latent_dim)
-        self.decoder = Decoder(self.input_dim)
-
     def reparameterize(self, key, mu, logvar):
         std = jnp.exp(0.5 * logvar)
         eps = jax.random.normal(key, std.shape)
         return mu + eps * std
 
+    @nn.compact
     def __call__(self, x, key):
-        mu, logvar = self.encoder(x)
+        out_dim = x.shape[-1]
+        mu, logvar = Encoder(self.latent_dim)(x)
         z = self.reparameterize(key, mu, logvar)
-        recon = self.decoder(z)
+        recon = Decoder(self.input_dim, out_dim)(z)
 
         return recon, mu, logvar
 

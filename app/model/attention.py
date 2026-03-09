@@ -6,10 +6,11 @@ import flax.linen as nn
 class MultiHeadAttention(nn.Module):
     num_heads: int
     head_dim: int
-    model_dim: int
 
     @nn.compact
     def __call__(self, k, q, v):
+
+        model_dim = v.shape[-1]
 
         k = nn.Dense(self.num_heads * self.head_dim)(k)
         q = nn.Dense(self.num_heads * self.head_dim)(q)
@@ -28,4 +29,4 @@ class MultiHeadAttention(nn.Module):
         out = jnp.einsum("bchq,bqhd->bchd", attn, v)
         B, C, H, D = out.shape
 
-        return nn.Dense(self.model_dim)(out.reshape(B, C, H * D))
+        return nn.Dense(model_dim)(out.reshape(B, C, H * D))

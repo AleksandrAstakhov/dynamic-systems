@@ -7,9 +7,8 @@ class TimeSeriesPositionalEncoding(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        B, S, C, D = x.shape
+        B, S, D = x.shape
 
-        x_reshaped = x.transpose(0, 2, 1, 3).reshape(B*C, S, D)
 
         pos = jnp.arange(S)[:, None]
 
@@ -37,4 +36,4 @@ class TimeSeriesPositionalEncoding(nn.Module):
 
         pe = pe + learned[:, :S]
 
-        return (x_reshaped + pe).reshape(B, C, S, D).transpose(0, 2, 1, 3)
+        return (x + pe)
