@@ -25,10 +25,10 @@ class Transformer(nn.Module):
 
     @nn.compact
     def __call__(self, x):
-        model_dim = self.num_heads * self.head_dim
+        model_dim = x.shape[-1]
 
         if self.need_pos_enc:
-            x = TimeSeriesPositionalEncoding(model_dim)(x)
+            x = TimeSeriesPositionalEncoding()(x)
 
         h = nn.LayerNorm()(x)
         h = MultiHeadAttention(self.head_dim, self.num_heads)(h, h, h)
@@ -57,35 +57,28 @@ class STFormer(nn.Module):
     def __call__(self, x):
         B, S, C, D = x.shape
 
-        def create_temporal_transformer():
-            return Transformer(
-                num_heads=self.num_heads,
-                head_dim=self.head_dim,
-                mlp_dim=self.mlp_dim,
-                need_pos_enc=True
-            )
-        
-        temporal_vmap = nn.vmap(
-            create_temporal_transformer,
-            variable_axes={'params': 0},
-            split_rngs={'params': True},
+        temp_transformer = nn.vmap(
+            Transformer,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
             in_axes=2,
-            out_axes=2
+            out_axes=2,
+        )(
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            mlp_dim=self.mlp_dim,
+            need_pos_enc=True,
         )
-        
-        h = temporal_vmap(x)
 
-        self.spatial_transformer = Transformer(
+        h = temp_transformer(x)
+
+        spatial_transformer = Transformer(
             num_heads=self.num_heads,
             head_dim=self.head_dim,
             mlp_dim=self.mlp_dim,
             need_pos_enc=False,
         )
 
-        s_list = []
-        for i in range(S):
-            sp = h[:, i, :, :]
-            s_list.append(self.spatial_transformer(sp))
-        h = jnp.stack(s_list, axis=1)
+        h = jax.vmap(spatial_transformer, in_axes=1, out_axes=1, axis_size=S)(h)
 
         return h

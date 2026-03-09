@@ -3,7 +3,6 @@ import jax.numpy as jnp
 import flax.linen as nn
 
 class TimeSeriesPositionalEncoding(nn.Module):
-    d_model: int
     max_len: int = 10000
 
     @nn.compact
