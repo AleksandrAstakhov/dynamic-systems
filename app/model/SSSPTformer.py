@@ -16,6 +16,8 @@ from tqdm import tqdm
 import numpy as np
 from eegdash.dataset import DS006940
 
+base_key = jax.random.key(42)
+
 
 class SSSPformer(nn.Module):
     num_heads: int
@@ -25,11 +27,11 @@ class SSSPformer(nn.Module):
     num_layers: int
 
     @nn.compact
-    def __call__(self, x):
+    def __call__(self, x, key):
 
         B, S, C, D = x.shape
 
-        x_ = x.rashape(B * S, C, D)
+        x_ = x.reshape(B * S, C, D)
 
         recon, mu, logvar = nn.vmap(
             VAE,
@@ -38,7 +40,7 @@ class SSSPformer(nn.Module):
             in_axes=1,
             out_axes=1,
             axis_size=C,
-        )(latent_dim=self.latent_dim, input_dim=D)(x_)
+        )(latent_dim=self.latent_dim, input_dim=D)(x_, jax.random.split(key, C))
 
         recon_reshaped = recon.reshape(B, S, C, -1)
 
@@ -67,7 +69,8 @@ class SSSPformer(nn.Module):
 
 
 def loss_fn(params: dict, model: nn.Module, x: Tensor, y: Tensor):
-    out = model.apply(params, x)
+    base_key, new_key = jax.random.split(base_key)
+    out = model.apply(params, x, new_key)
 
     prediction = out["prediction"]
     recnstruction = out["recnstruction"]
@@ -104,7 +107,6 @@ def train_model(model: nn.Module, dataloader: DataLoader, dummy_x: jnp.Array, ep
         print(f"Epoch {i + 1}, Loss: ", jnp.array(losses).mean())
 
 
-@jax.jit
 def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
 
     T, C = data.shape
@@ -122,7 +124,6 @@ def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
     return embedded.transpose(0, 2, 1)
 
 
-@jax.jit
 def create_dataset(embedded, window=20, horizon=5):
     T = embedded.shape[0]
 
@@ -203,5 +204,8 @@ if __name__ == "__main__":
     model = SSSPformer(4, 8, 64, 64, 3)
     batch_size = 32
     train_model(
-        model, dataloader(X_train, y_train, 32), jnp.ones(X_train[:batch_size].shape), 15
+        model,
+        dataloader(X_train, y_train, 32),
+        jnp.ones(X_train[:batch_size].shape),
+        15,
     )
