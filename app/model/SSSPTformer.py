@@ -15,6 +15,7 @@ from jax import grad, value_and_grad
 from tqdm import tqdm
 import numpy as np
 from eegdash.dataset import DS006940
+from functools import partial
 
 base_key = jax.random.key(42)
 
@@ -23,7 +24,7 @@ class SSSPformer(nn.Module):
     num_heads: int
     head_dim: int
     mlp_dim: int
-    vae_latent: int 
+    vae_latent: int
     latent_dim: int
     num_layers: int
 
@@ -86,29 +87,99 @@ def loss_fn(params: dict, model: nn.Module, x, y, key):
     return recon_loss + kl + prediction_loss
 
 
-def train_step(params, opt_state, x, y, optimizer):
-    global base_key
-    base_key, new_key = jax.random.split(base_key)
-    loss, grads = jax.value_and_grad(loss_fn)(params, model, x, y, new_key)
+@partial(jax.jit, static_argnums=(0, 6))
+def train_step(model, params, key, opt_state, x, y, optimizer):
+    loss, grads = jax.value_and_grad(loss_fn)(params, model, x, y, key)
     updates, opt_state = optimizer.update(grads, opt_state)
     params = optax.apply_updates(params, updates)
     return params, opt_state, loss
 
+@partial(jax.jit, static_argnums=(0,))
+def eval_step(model, params, key, x, y):
+    return loss_fn(params, model, x, y, key)
 
-def train_model(model: nn.Module, dataloader: DataLoader, dummy_x: jnp.Array, epochs):
+@partial(jax.jit, static_argnums=(0,))
+def predict(model, params, key, x):
+    out = model.apply(params, x, key)
+    return out["prediction"]
+
+
+def train_model(model, x_train, y_train, x_test, y_test, batch_size, dummy_x, epochs):
+
     global base_key
-    base_key, new_key = jax.random.split(base_key)
+    base_key, new_key, dataloader_key, step_key, eval_key = jax.random.split(base_key, 5)
+
     params = model.init(base_key, dummy_x, new_key)
+
     optimizer = optax.adam(learning_rate=1e-3)
     opt_state = optimizer.init(params)
 
     for i in tqdm(range(epochs)):
-        losses = []
-        for x, y in tqdm(dataloader):
-            params, opt_state, loss = train_step(params, opt_state, x, y, optimizer)
-            losses.append(loss)
-        print(f"Epoch {i + 1}, Loss: ", jnp.array(losses).mean())
 
+        losses = []
+
+        dataloader_key, cur_dataloader_key = jax.random.split(dataloader_key)
+        train_loader = create_dataloader(cur_dataloader_key, x_train, y_train, batch_size)
+
+        for x, y in zip(train_loader[0], train_loader[1]):
+
+            step_key, cur_step_key = jax.random.split(step_key)
+
+            params, opt_state, loss = train_step(
+                model, params, cur_step_key, opt_state, x, y, optimizer
+            )
+
+            losses.append(loss)
+
+        train_loss = jnp.array(losses).mean()
+
+        # ---------- validation ----------
+
+        eval_key, cur_eval_key = jax.random.split(eval_key)
+
+        test_loader = create_dataloader(cur_eval_key, x_test, y_test, batch_size, shuffle=False)
+
+        val_losses = []
+
+        for x, y in zip(test_loader[0], test_loader[1]):
+
+            eval_key, cur_eval_key = jax.random.split(eval_key)
+
+            val_loss = eval_step(model, params, cur_eval_key, x, y)
+
+            val_losses.append(val_loss)
+
+        val_loss = jnp.array(val_losses).mean()
+
+        print(f"Epoch {i+1} | train loss {train_loss:.4f} | val loss {val_loss:.4f}")
+
+    return params
+
+def plot_prediction(model, params, x_test, y_test):
+
+    key = jax.random.key(0)
+
+    sample = x_test[0:1]
+
+    pred = predict(model, params, key, sample)
+
+    pred = np.array(pred[0])
+    truth = np.array(y_test[0])
+
+    # берём два канала
+    channels = [0, 1]
+
+    for ch in channels:
+
+        plt.figure(figsize=(10,4))
+
+        plt.plot(truth[:, ch, 0], label="truth")
+        plt.plot(pred[:, ch, 0], label="prediction")
+
+        plt.title(f"Channel {ch}")
+        plt.legend()
+
+        plt.show()
 
 def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
 
@@ -141,17 +212,24 @@ def create_dataset(embedded, window=20, horizon=5):
     return x, y
 
 
-def dataloader(x, y, batch_size, shuffle=True):
+def create_dataloader(key, x, y, batch_size, shuffle=True):
 
     n = x.shape[0]
-    idx = np.arange(n)
 
     if shuffle:
-        np.random.shuffle(idx)
+        idx = jax.random.permutation(key, n)
+        x = x[idx]
+        y = y[idx]
 
-    for i in range(0, n, batch_size):
-        batch_idx = idx[i : i + batch_size]
-        yield x[batch_idx], y[batch_idx]
+    n_batches = n // batch_size
+
+    x = x[: n_batches * batch_size]
+    y = y[: n_batches * batch_size]
+
+    x = x.reshape(n_batches, batch_size, *x.shape[1:])
+    y = y.reshape(n_batches, batch_size, *y.shape[1:])
+
+    return (x, y)
 
 
 if __name__ == "__main__":
@@ -191,7 +269,7 @@ if __name__ == "__main__":
 
     X, y = create_dataset(X_embedded, window=window_size, horizon=horizon)
 
-    split_norm = len(X)
+    split_norm = int(len(X) * 0.8)
 
     print("Dataset:", X.shape, y.shape)
 
@@ -206,9 +284,14 @@ if __name__ == "__main__":
 
     model = SSSPformer(4, 8, 64, 4, 64, 3)
     batch_size = 32
-    train_model(
+    params = train_model(
         model,
-        dataloader(X_train, y_train, 32),
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        32,
         jnp.ones(X_train[:batch_size].shape),
-        15,
+        40,
     )
+    plot_prediction(model, params, X_test, y_test)
