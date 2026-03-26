@@ -287,6 +287,124 @@ def train_model(
 
 #         plt.show()
 
+import jax
+import jax.numpy as jnp
+import numpy as np
+import matplotlib.pyplot as plt
+from typing import Optional
+
+
+@nnx.jit
+def _model_step(model, x_context):
+    """Один шаг модели: принимает контекст, возвращает предсказание на следующий шаг."""
+    out = model(x_context)
+    # Берем предсказание только для последнего временного шага
+    # out["prediction"]: (B, S, C, D) -> берем [:, -1, :, :] -> (B, 1, C, D)
+    next_step = out["prediction"][:, -1:, :, :]
+    return next_step
+
+
+def generate_trajectory(
+    model,
+    x_init: jnp.ndarray,
+    horizon: int,
+    *,
+    key: Optional[jax.Array] = None,
+    denoise: bool = True,
+) -> jnp.ndarray:
+    B, S, C, D = x_init.shape
+    current_ctx = x_init
+
+    generated = []
+
+    for _ in range(horizon):
+
+        next_step = _model_step(model, current_ctx)
+        generated.append(next_step)
+
+        current_ctx = jnp.concatenate([current_ctx[:, 1:, :, :], next_step], axis=1)
+
+    return jnp.concatenate(generated, axis=1)
+
+
+def plot_prediction(
+    model,
+    x_test: jnp.ndarray,
+    y_test: jnp.ndarray,
+    *,
+    sample_idx: int = 0,
+    channels: list[int] = [0, 1],
+    feature_idx: int = 0,
+    horizon: Optional[int] = None,
+    key: Optional[jax.Array] = None,
+    figsize: tuple[int, int] = (12, 6),
+):
+
+    x_sample = x_test[sample_idx : sample_idx + 1]
+    y_sample = y_test[sample_idx : sample_idx + 1]
+
+    if horizon is None:
+        horizon = y_sample.shape[1]
+
+    with nnx.contextualize(model, rngs=nnx.Rngs(key or jax.random.key(0))):
+        pred_future = generate_trajectory(model, x_sample, horizon=horizon, key=key)
+
+    x_vals = np.array(x_sample[0, :, channels, feature_idx])
+    y_vals = np.array(y_sample[0, :, channels, feature_idx])
+    pred_vals = np.array(pred_future[0, :, channels, feature_idx])
+
+    t_context = np.arange(x_vals.shape[0])
+    t_future = np.arange(x_vals.shape[0], x_vals.shape[0] + pred_vals.shape[0])
+
+    n_channels = 3
+    fig, axes = plt.subplots(n_channels, 1, figsize=figsize, sharex=True)
+    if n_channels == 1:
+        axes = [axes]
+
+    for i, (ch_idx, ax) in enumerate(zip(channels, axes)):
+        ax.plot(
+            t_context, x_vals[:, i], label="Input (context)", color="gray", linewidth=1
+        )
+        ax.plot(
+            np.arange(x_vals.shape[0], x_vals.shape[0] + y_vals.shape[0]),
+            y_vals[:, i],
+            label="Ground Truth",
+            color="green",
+            linewidth=2,
+            alpha=0.7,
+        )
+
+        ax.plot(
+            t_future,
+            pred_vals[:, i],
+            label="Prediction",
+            color="red",
+            linestyle="--",
+            linewidth=2,
+        )
+
+        ax.axvline(
+            x=x_vals.shape[0] - 0.5,
+            color="blue",
+            linestyle=":",
+            alpha=0.5,
+            label="Forecast start",
+        )
+
+        ax.set_title(f"Channel {ch_idx} (feature {feature_idx})")
+        ax.set_ylabel("Amplitude (normalized)")
+        ax.legend(fontsize=9)
+        ax.grid(True, alpha=0.3)
+
+    axes[-1].set_xlabel("Time step")
+    plt.tight_layout()
+    plt.show()
+
+    if horizon <= y_sample.shape[1]:
+        y_truth_overlap = y_sample[0, :horizon, channels, feature_idx]
+        mse = np.mean((pred_vals - y_truth_overlap) ** 2)
+        print(f"MSE на горизонте {horizon}: {mse:.6f}")
+
 
 def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
 
