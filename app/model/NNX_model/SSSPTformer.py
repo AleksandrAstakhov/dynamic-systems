@@ -356,7 +356,7 @@ def plot_prediction(
     t_context = np.arange(x_vals.shape[0])
     t_future = np.arange(x_vals.shape[0], x_vals.shape[0] + pred_vals.shape[0])
 
-    n_channels = 3
+    n_channels = len(channels)
     fig, axes = plt.subplots(n_channels, 1, figsize=figsize, sharex=True)
     if n_channels == 1:
         axes = [axes]
@@ -541,4 +541,4 @@ if __name__ == "__main__":
         batch_size,
         epochs=40,
     )
-    # plot_prediction(model, params, X_test, y_test)
+    plot_prediction(model, X_test, y_test)
