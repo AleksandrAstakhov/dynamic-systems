@@ -199,3 +199,66 @@ class DiffGraphSTFormerBlock(nnx.Module):
         out = self.mlp(h)
 
         return out + res
+
+
+
+class STFormerBlock(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        num_chanels,
+        *,
+        rngs: nnx.Rngs
+    ):
+
+        self.spatial_transformer = Transformer(
+            in_dim=model_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=False,
+            rngs=rngs,
+        )
+
+        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
+
+        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
+
+        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+
+        self.temporal_transformer = create_v_model(
+            rngs,
+            Transformer,
+            model_args={
+                "in_dim": in_dim,
+                "out_dim": model_dim,
+                "num_heads": num_heads,
+                "model_dim": model_dim,
+                "num_heads": num_heads,
+                "head_dim": head_dim,
+                "need_pos_enc": True,
+            },
+        )
+
+        nnx.restore_rngs(backup)
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+    def __call__(self, x):
+
+        h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
+            self.temporal_transformer, x
+        )
+
+        res = h
+        h = self.ln(h)
+        h = self.mlp(h)
+
+        return h + res
+    
