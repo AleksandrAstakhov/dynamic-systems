@@ -19,6 +19,8 @@ class GrandDiffuser(nnx.Module):
     ):
         self.num_heads, self.head_dim = num_heads, head_dim
 
+        self.ln = nnx.LayerNorm(in_dim)
+
         self.init_enc = nnx.Linear(in_dim, model_dim, rngs=rngs)
 
         self.k_proj = nnx.Linear(model_dim, num_heads * head_dim, rngs=rngs)
@@ -31,6 +33,8 @@ class GrandDiffuser(nnx.Module):
 
     def __call__(self, t, x):
         B, S, C, D = x.shape
+
+        x = self.ln(x)
 
         x = x.reshape(B * S, C, D)
 
