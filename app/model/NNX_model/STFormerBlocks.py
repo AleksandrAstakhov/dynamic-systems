@@ -278,13 +278,13 @@ class TFormerBlock(nnx.Module):
         # )
 
         self.temporal_transformer = Transformer(
-            in_dim=in_dim,
-            out_dim=out_dim,
+            in_dim=model_dim,
+            out_dim=model_dim,
             num_heads=num_heads,
             model_dim=model_dim,
-            num_heads=num_heads,
             head_dim=head_dim,
             need_pos_enc=True,
+            rngs=rngs,
         )
 
         nnx.restore_rngs(backup)
