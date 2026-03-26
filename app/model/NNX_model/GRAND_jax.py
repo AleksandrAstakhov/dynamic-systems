@@ -51,6 +51,7 @@ class GrandDiffuser(nnx.Module):
             k.transpose(0, 2, 1, 3),
             q.transpose(0, 2, 3, 1),
         )
+        attn_logits = attn_logits / jnp.sqrt(self.head_dim).astype(attn_logits.dtype)
 
         attn = jax.nn.softmax(attn_logits, axis=-1)
 

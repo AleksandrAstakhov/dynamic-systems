@@ -1,75 +1,24 @@
 import jax
 import jax.numpy as jnp
+import flax.linen as nn
+
+from STFormerBlocks import STFormerBlock, DiffGraphSTFormerBlock
+from VAE import VAE
+import matplotlib.pyplot as plt
+import optax
+from typing import Any
+from flax.training import train_state, checkpoints
+from torch import Tensor
+import torch
+from jax import grad, value_and_grad
+from tqdm import tqdm
+import numpy as np
+from eegdash.dataset import DS006940
+from functools import partial
 from flax import nnx
-from flax.nnx import bridge
-
-
-from positional_encoding import TimeSeriesPositionalEncoding
-from GRAND_jax import Grand, GrandDiffuser
-
-from attention import MultiHeadAttention
 from utils import create_v_model
 
-
-class MLP(nnx.Module):
-    def __init__(self, din: int, dmid: int, dout: int, *, rngs: nnx.Rngs):
-        self.linear1 = nnx.Linear(din, dmid, rngs=rngs)
-        self.linear2 = nnx.Linear(dmid, dout, rngs=rngs)
-
-    def __call__(self, x: jax.Array):
-        x = nnx.gelu(self.linear1(x))
-        return self.linear2(x)
-
-
-class Transformer(nnx.Module):
-
-    def __init__(
-        self,
-        in_dim,
-        out_dim,
-        model_dim,
-        num_heads,
-        head_dim,
-        *,
-        rngs: nnx.Rngs,
-        need_pos_enc=True
-    ):
-        self.need_pos_enc = need_pos_enc
-
-        self.pos_enc = TimeSeriesPositionalEncoding()
-
-        self.mha = MultiHeadAttention(
-            in_dim=model_dim,
-            out_dim=model_dim,
-            num_heads=num_heads,
-            head_dim=head_dim,
-            rngs=rngs,
-        )
-
-        self.init_lin = nnx.Linear(in_dim, model_dim, rngs=rngs)
-
-        self.ln1 = nnx.LayerNorm(model_dim, rngs=rngs)
-        self.ln2 = nnx.LayerNorm(model_dim, rngs=rngs)
-
-        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
-        self.rngs = nnx.Rngs(rngs.params())
-
-    def __call__(self, x):
-
-        x = self.init_lin(x)
-
-        if self.need_pos_enc:
-            x = self.pos_enc(x)
-
-        h = self.ln1(x)
-        h = self.mha(h, h, h)
-        x = x + h
-
-        h = self.ln2(x)
-        h = self.mlp(h)
-        x = x + h
-
-        return x
+base_key = jax.random.key(42)
 
 
 class STFormer(nnx.Module):
@@ -81,39 +30,50 @@ class STFormer(nnx.Module):
         model_dim,
         num_heads,
         head_dim,
+        vae_latent,
+        num_layers,
         num_chanels,
         *,
-        rngs: nnx.Rngs
+        rngs: nnx.Rngs,
     ):
 
-        self.spatial_transformer = Transformer(
-            in_dim=model_dim,
-            out_dim=model_dim,
-            num_heads=num_heads,
-            model_dim=model_dim,
-            head_dim=head_dim,
-            need_pos_enc=False,
-            rngs=rngs,
+        self.model_layers = nnx.Sequential(
+            *[
+                STFormerBlock(
+                    in_dim=vae_latent if i == 0 else model_dim,
+                    out_dim=model_dim,
+                    model_dim=model_dim,
+                    num_heads=num_heads,
+                    head_dim=head_dim,
+                    num_chanels=num_chanels,
+                    rngs=rngs,
+                )
+                for i in range(num_layers)
+            ]
         )
-
-        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
-
-        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
         backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
-        self.temporal_transformer = create_v_model(
+        self.vae = create_v_model(
+            rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
+        )
+
+        self.mu_proj = create_v_model(
             rngs,
-            Transformer,
-            model_args={
-                "in_dim": in_dim,
-                "out_dim": model_dim,
-                "num_heads": num_heads,
-                "model_dim": model_dim,
-                "num_heads": num_heads,
-                "head_dim": head_dim,
-                "need_pos_enc": True,
-            },
+            nnx.Linear,
+            model_args={"in_features": model_dim, "out_features": vae_latent},
+        )
+
+        self.logvar_prog = create_v_model(
+            rngs,
+            nnx.Linear,
+            model_args={"in_features": model_dim, "out_features": vae_latent},
+        )
+
+        self.out_proj = create_v_model(
+            rngs,
+            nnx.Linear,
+            model_args={"in_features": vae_latent, "out_features": out_dim},
         )
 
         nnx.restore_rngs(backup)
@@ -122,20 +82,51 @@ class STFormer(nnx.Module):
 
     def __call__(self, x):
 
-        h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
-            self.temporal_transformer, x
+        B, S, C, D = x.shape
+
+        x_ = x.reshape(B * S, C, D)
+
+        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1)(
+            self.vae, x_
         )
 
-        h = nnx.vmap(lambda d : self.spatial_transformer(d), in_axes=1, out_axes=1)(h)
+        recon = recon.reshape(B, S, C, D)
 
-        res = h
-        h = self.ln(h)
-        h = self.mlp(h)
+        # mu_ = mu.reshape(B, S, C, -1)
+        # logvar_ = logvar.reshape(B, S, C, -1)
 
-        return h + res
+        # z = mu_ + logvar_ * rngs
+        z = mu.reshape(B, S, C, -1)
+
+        p = self.model_layers(z).reshape(B * S, C, -1)
+
+        mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.mu_proj, p
+        )
+        logvar_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.logvar_prog, p
+        )
+
+        sigma = jax.nn.softplus(logvar_pred) + 1e-4
+        eps = self.rngs.normal(shape=mu_pred.shape)
+
+        z_next = mu_pred + sigma * eps
+
+        out = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.out_proj, z_next
+        ).reshape(B, S, C, -1)
+
+        return {
+            "prediction": out,
+            "reconstruction": recon,
+            "mu": mu,
+            "logvar": logvar,
+            "mu_pred": mu_pred,
+            "sigma": sigma,
+        }
 
 
-class DiffGraphSTFormer(nnx.Module):
+class DiffGraphSTFormer(STFormer):
 
     def __init__(
         self,
@@ -144,58 +135,35 @@ class DiffGraphSTFormer(nnx.Module):
         model_dim,
         num_heads,
         head_dim,
+        vae_latent,
+        num_layers,
         num_chanels,
         *,
-        rngs: nnx.Rngs
+        rngs: nnx.Rngs,
     ):
-
-        self.spatial_model = Grand(
-            in_dim=model_dim,
+        super().__init__(
+            in_dim=in_dim,
+            out_dim=out_dim,
             model_dim=model_dim,
-            out_dim=model_dim,
             num_heads=num_heads,
             head_dim=head_dim,
+            vae_latent=vae_latent,
+            num_layers=num_layers,
             num_chanels=num_chanels,
             rngs=rngs,
         )
 
-        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
-
-        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
-
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
-
-        self.temporal_transformer = create_v_model(
-            rngs,
-            Transformer,
-            model_args={
-                "in_dim": in_dim,
-                "out_dim": model_dim,
-                "model_dim": model_dim,
-                "num_heads": num_heads,
-                "head_dim": head_dim,
-                "need_pos_enc": True,
-            },
+        self.model_layers = nnx.Sequential(
+            *[
+                DiffGraphSTFormerBlock(
+                    in_dim=vae_latent if i == 0 else model_dim,
+                    out_dim=model_dim,
+                    model_dim=model_dim,
+                    num_heads=num_heads,
+                    head_dim=head_dim,
+                    num_chanels=num_chanels,
+                    rngs=rngs,
+                )
+                for i in range(num_layers)
+            ]
         )
-
-        nnx.restore_rngs(backup)
-
-        self.rngs = nnx.Rngs(rngs.params())
-
-    def __call__(self, x: jax.Array) -> jax.Array:
-        _, S, _, _ = x.shape
-
-        h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
-            self.temporal_transformer, x
-        )
-
-        t_grid = jnp.linspace(0, 1, 5)
-
-        h = self.spatial_model(h, t_grid)
-        
-
-        res = h
-        h = self.ln(h)
-        out = self.mlp(h)
-
-        return out + res

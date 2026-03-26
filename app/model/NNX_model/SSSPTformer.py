@@ -18,112 +18,113 @@ from functools import partial
 from flax import nnx
 from utils import create_v_model
 
+
 base_key = jax.random.key(42)
 
 
-class SSSPformer(nnx.Module):
+# class SSSPformer(nnx.Module):
 
-    def __init__(
-        self,
-        in_dim,
-        out_dim,
-        model_dim,
-        num_heads,
-        head_dim,
-        vae_latent,
-        num_layers,
-        num_chanels,
-        *,
-        rngs: nnx.Rngs,
-    ):
+#     def __init__(
+#         self,
+#         in_dim,
+#         out_dim,
+#         model_dim,
+#         num_heads,
+#         head_dim,
+#         vae_latent,
+#         num_layers,
+#         num_chanels,
+#         *,
+#         rngs: nnx.Rngs,
+#     ):
 
-        self.model_layers = nnx.Sequential(
-            *[
-                DiffGraphSTFormer(
-                    in_dim=vae_latent if i == 0 else model_dim,
-                    out_dim=model_dim,
-                    model_dim=model_dim,
-                    num_heads=num_heads,
-                    head_dim=head_dim,
-                    num_chanels=num_chanels,
-                    rngs=rngs,
-                )
-                for i in range(num_layers)
-            ]
-        )
+#         self.model_layers = nnx.Sequential(
+#             *[
+#                 DiffGraphSTFormer(
+#                     in_dim=vae_latent if i == 0 else model_dim,
+#                     out_dim=model_dim,
+#                     model_dim=model_dim,
+#                     num_heads=num_heads,
+#                     head_dim=head_dim,
+#                     num_chanels=num_chanels,
+#                     rngs=rngs,
+#                 )
+#                 for i in range(num_layers)
+#             ]
+#         )
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+#         backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
-        self.vae = create_v_model(
-            rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
-        )
+#         self.vae = create_v_model(
+#             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
+#         )
 
-        self.mu_proj = create_v_model(
-            rngs,
-            nnx.Linear,
-            model_args={"in_features": model_dim, "out_features": vae_latent},
-        )
+#         self.mu_proj = create_v_model(
+#             rngs,
+#             nnx.Linear,
+#             model_args={"in_features": model_dim, "out_features": vae_latent},
+#         )
 
-        self.logvar_prog = create_v_model(
-            rngs,
-            nnx.Linear,
-            model_args={"in_features": model_dim, "out_features": vae_latent},
-        )
+#         self.logvar_prog = create_v_model(
+#             rngs,
+#             nnx.Linear,
+#             model_args={"in_features": model_dim, "out_features": vae_latent},
+#         )
 
-        self.out_proj = create_v_model(
-            rngs,
-            nnx.Linear,
-            model_args={"in_features": vae_latent, "out_features": out_dim},
-        )
+#         self.out_proj = create_v_model(
+#             rngs,
+#             nnx.Linear,
+#             model_args={"in_features": vae_latent, "out_features": out_dim},
+#         )
 
-        nnx.restore_rngs(backup)
+#         nnx.restore_rngs(backup)
 
-        self.rngs = nnx.Rngs(rngs.params())
+#         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, x):
+#     def __call__(self, x):
 
-        B, S, C, D = x.shape
+#         B, S, C, D = x.shape
 
-        x_ = x.reshape(B * S, C, D)
+#         x_ = x.reshape(B * S, C, D)
 
-        recon, mu, logvar = nnx.vmap(
-            lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1
-        )(self.vae, x_)
+#         recon, mu, logvar = nnx.vmap(
+#             lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1
+#         )(self.vae, x_)
 
-        recon = recon.reshape(B, S, C, D)
+#         recon = recon.reshape(B, S, C, D)
 
-        # mu_ = mu.reshape(B, S, C, -1)
-        # logvar_ = logvar.reshape(B, S, C, -1)
+#         # mu_ = mu.reshape(B, S, C, -1)
+#         # logvar_ = logvar.reshape(B, S, C, -1)
 
-        # z = mu_ + logvar_ * rngs
-        z = mu.reshape(B, S, C, -1)
+#         # z = mu_ + logvar_ * rngs
+#         z = mu.reshape(B, S, C, -1)
 
-        p = self.model_layers(z).reshape(B * S, C, -1)
+#         p = self.model_layers(z).reshape(B * S, C, -1)
 
-        mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-            self.mu_proj, p
-        )
-        logvar_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-            self.logvar_prog, p
-        )
+#         mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+#             self.mu_proj, p
+#         )
+#         logvar_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+#             self.logvar_prog, p
+#         )
 
-        sigma = jax.nn.softplus(logvar_pred) + 1e-4
-        eps = self.rngs.normal(shape=mu_pred.shape)
+#         sigma = jax.nn.softplus(logvar_pred) + 1e-4
+#         eps = self.rngs.normal(shape=mu_pred.shape)
 
-        z_next = mu_pred + sigma * eps
+#         z_next = mu_pred + sigma * eps
 
-        out = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-            self.out_proj, z_next
-        ).reshape(B, S, C, -1)
+#         out = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+#             self.out_proj, z_next
+#         ).reshape(B, S, C, -1)
 
-        return {
-            "prediction": out,
-            "reconstruction": recon,
-            "mu": mu,
-            "logvar": logvar,
-            "mu_pred": mu_pred,
-            "sigma": sigma,
-        }
+#         return {
+#             "prediction": out,
+#             "reconstruction": recon,
+#             "mu": mu,
+#             "logvar": logvar,
+#             "mu_pred": mu_pred,
+#             "sigma": sigma,
+#         }
 
 
 def loss_fn(model, x, y):
@@ -399,7 +400,7 @@ if __name__ == "__main__":
     # MODEL (NNX)
     # -------------------------
 
-    model = SSSPformer(
+    model = STFormer(
         in_dim=8,
         out_dim=8,
         model_dim=32,
