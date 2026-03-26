@@ -202,7 +202,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
 
 
 
-class STFormerBlock(nnx.Module):
+class TFormerBlock(nnx.Module):
 
     def __init__(
         self,
