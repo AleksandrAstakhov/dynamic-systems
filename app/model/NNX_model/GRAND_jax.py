@@ -19,8 +19,6 @@ class GrandDiffuser(nnx.Module):
     ):
         self.num_heads, self.head_dim = num_heads, head_dim
 
-        self.ln = nnx.LayerNorm(in_dim)
-
         self.init_enc = nnx.Linear(in_dim, model_dim, rngs=rngs)
 
         self.k_proj = nnx.Linear(model_dim, num_heads * head_dim, rngs=rngs)
@@ -33,8 +31,6 @@ class GrandDiffuser(nnx.Module):
 
     def __call__(self, t, x):
         B, S, C, D = x.shape
-
-        x = self.ln(x)
 
         x = x.reshape(B * S, C, D)
 
@@ -59,7 +55,7 @@ class GrandDiffuser(nnx.Module):
 
         attn = jax.nn.softmax(attn_logits, axis=-1)
 
-        out = jnp.matmul(attn, v.transpose(0, 2, 1, 3))
+        out = jnp.matmul(attn - self.ones, v.transpose(0, 2, 1, 3))
         out = out.transpose(0, 2, 1, 3)
 
         out = out.reshape(B * S, C, self.num_heads * self.head_dim)
@@ -103,13 +99,12 @@ class Grand(nnx.Module):
             self.solver,
             t0=t[0],
             t1=t[-1],
-            dt0=0.1,
-
-            max_steps=32,
+            dt0=0.17,
 
             y0=x,
 
             saveat=diffrax.SaveAt(t1=True),
+            adjoint=diffrax.DirectAdjoint()
         )
 
         return sol.ys[-1]

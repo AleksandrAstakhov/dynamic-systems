@@ -189,7 +189,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
             self.temporal_transformer, x
         )
 
-        t_grid = jnp.linspace(0, 1, 5)
+        t_grid = jnp.linspace(0, 0.5, 4)
 
         h = self.spatial_model(h, t_grid)
         
