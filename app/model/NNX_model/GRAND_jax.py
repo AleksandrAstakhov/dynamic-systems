@@ -25,7 +25,7 @@ class GrandDiffuser(nnx.Module):
         self.q_proj = nnx.Linear(model_dim, num_heads * head_dim, rngs=rngs)
         self.v_proj = nnx.Linear(model_dim, num_heads * head_dim, rngs=rngs)
 
-        self.ones = jnp.eye(num_chanels)[None, :, None, :]
+        self.ones = jnp.eye(num_chanels)[None, None, :, :]
 
         self.out_proj = nnx.Linear(num_heads * head_dim, out_dim, rngs=rngs)
 
