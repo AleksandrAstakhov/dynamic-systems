@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import STFormer, DiffGraphSTFormer
+from STFormer import STFormer, DiffGraphSTFormer, TFormer
 from VAE import VAE
 import matplotlib.pyplot as plt
 import optax
