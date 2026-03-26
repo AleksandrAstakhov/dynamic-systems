@@ -85,7 +85,6 @@ class STFormerBlock(nnx.Module):
         *,
         rngs: nnx.Rngs
     ):
-
         self.spatial_transformer = Transformer(
             in_dim=model_dim,
             out_dim=model_dim,
@@ -97,7 +96,7 @@ class STFormerBlock(nnx.Module):
         )
 
         self.temporal_transformer = Transformer(
-            in_dim=model_dim,
+            in_dim=in_dim,
             out_dim=model_dim,
             num_heads=num_heads,
             model_dim=model_dim,
@@ -167,7 +166,6 @@ class DiffGraphSTFormerBlock(nnx.Module):
         *,
         rngs: nnx.Rngs
     ):
-
         self.spatial_model = Grand(
             in_dim=model_dim,
             model_dim=model_dim,
@@ -183,7 +181,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
         self.temporal_transformer = Transformer(
-            in_dim=model_dim,
+            in_dim=in_dim,
             out_dim=model_dim,
             num_heads=num_heads,
             model_dim=model_dim,
@@ -246,7 +244,6 @@ class TFormerBlock(nnx.Module):
         *,
         rngs: nnx.Rngs
     ):
-
         self.spatial_transformer = Transformer(
             in_dim=model_dim,
             out_dim=model_dim,
@@ -257,11 +254,21 @@ class TFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
+        self.temporal_transformer = Transformer(
+            in_dim=in_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=True,
+            rngs=rngs,
+        )
+
         self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+        # backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
         # self.temporal_transformer = create_v_model(
         #     rngs,
@@ -277,29 +284,30 @@ class TFormerBlock(nnx.Module):
         #     },
         # )
 
-        self.temporal_transformer = Transformer(
-            in_dim=model_dim,
-            out_dim=model_dim,
-            num_heads=num_heads,
-            model_dim=model_dim,
-            head_dim=head_dim,
-            need_pos_enc=True,
-            rngs=rngs,
-        )
+        # nnx.restore_rngs(backup)
 
-        nnx.restore_rngs(backup)
-
-        self.rngs = nnx.Rngs(rngs.params())
+        # self.rngs = nnx.Rngs(rngs.params())
 
     def __call__(self, x):
         B, S, C, D = x.shape
 
-        h = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        # h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
+        #     self.temporal_transformer, x
+        # )
+
+        h = self.temporal_transformer(x)
+
+        # h = nnx.vmap(lambda d: self.spatial_transformer(d), in_axes=1, out_axes=1)(h)
+
+        h = h.reshape(B, C, S, D).transpose(0, 2, 1, 3).reshape(B * S, C, D)
+
+        h = self.spatial_transformer(h)
 
         res = h
         h = self.ln(h)
         h = self.mlp(h)
 
-        out = (h + res).reshape(B, C, S, D).transpose(0, 2, 1, 3)
-
-        return out
+        return (h + res).reshape(B, S, C, D)
