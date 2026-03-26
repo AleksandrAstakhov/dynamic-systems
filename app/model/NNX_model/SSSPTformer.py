@@ -289,14 +289,15 @@ def train_model(
 
 import jax
 import jax.numpy as jnp
+import jax.lax as lax
 import numpy as np
 import matplotlib.pyplot as plt
-from typing import Optional
+from typing import Optional, Sequence
 
 
-@nnx.jit
+@jax.jit
 def _model_step(model, x_context):
-    """Один шаг модели: принимает контекст, возвращает предсказание на следующий шаг."""
+    """Один шаг модели: принимает контекст (B, S, C, D), возвращает (B, 1, C, D)."""
     out = model(x_context)
     next_step = out["prediction"][:, -1:, :, :]
     return next_step
@@ -306,23 +307,38 @@ def generate_trajectory(
     model,
     x_init: jnp.ndarray,
     horizon: int,
-    *,
-    key: Optional[jax.Array] = None,
-    denoise: bool = True,
 ) -> jnp.ndarray:
-    B, S, C, D = x_init.shape
-    current_ctx = x_init
+    """
+    Генерация траектории.
 
-    generated = []
+    x_init: (B, S, C, D)
+    return: (B, horizon, C, D)
+    """
 
-    for _ in range(horizon):
+    def step_fn(carry, _):
+        current_ctx = carry  # (B, S, C, D)
 
-        next_step = _model_step(model, current_ctx)
-        generated.append(next_step)
+        next_step = _model_step(model, current_ctx)  # (B, 1, C, D)
 
-        current_ctx = jnp.concatenate([current_ctx[:, 1:, :, :], next_step], axis=1)
+        new_ctx = jnp.concatenate(
+            [current_ctx[:, 1:, :, :], next_step],
+            axis=1,
+        )
 
-    return jnp.concatenate(generated, axis=1)
+        return new_ctx, next_step
+
+    _, generated = lax.scan(
+        step_fn,
+        x_init,
+        xs=None,
+        length=horizon,
+    )
+
+    # generated: (horizon, B, 1, C, D)
+    generated = generated.transpose(1, 0, 2, 3, 4)  # (B, horizon, 1, C, D)
+    generated = generated.squeeze(axis=2)           # (B, horizon, C, D)
+
+    return generated
 
 
 def plot_prediction(
@@ -331,13 +347,16 @@ def plot_prediction(
     y_test: jnp.ndarray,
     *,
     sample_idx: int = 0,
-    channels: list[int] = [0, 1],
+    channels: Sequence[int] = (0, 1),
     feature_idx: int = -1,
     horizon: Optional[int] = None,
-    key: Optional[jax.Array] = None,
     figsize: tuple[int, int] = (12, 6),
 ):
+    """
+    Визуализация предсказания для одного элемента батча.
+    """
 
+    # сохраняем batch dimension (=1)
     x_sample = x_test[sample_idx : sample_idx + 1]
     y_sample = y_test[sample_idx : sample_idx + 1]
 
@@ -346,6 +365,7 @@ def plot_prediction(
 
     pred_future = generate_trajectory(model, x_sample, horizon=horizon)
 
+    # → numpy для matplotlib
     x_vals = np.array(x_sample[0, :, channels, feature_idx])
     y_vals = np.array(y_sample[0, :, channels, feature_idx])
     pred_vals = np.array(pred_future[0, :, channels, feature_idx])
@@ -355,18 +375,22 @@ def plot_prediction(
 
     n_channels = len(channels)
     fig, axes = plt.subplots(n_channels, 1, figsize=figsize, sharex=True)
+
     if n_channels == 1:
         axes = [axes]
 
     for i, (ch_idx, ax) in enumerate(zip(channels, axes)):
         ax.plot(
-            t_context, x_vals[:, i], label="Input (context)", color="gray", linewidth=1
+            t_context,
+            x_vals[:, i],
+            label="Input (context)",
+            linewidth=1,
         )
+
         ax.plot(
             np.arange(x_vals.shape[0], x_vals.shape[0] + y_vals.shape[0]),
             y_vals[:, i],
             label="Ground Truth",
-            color="green",
             linewidth=2,
             alpha=0.7,
         )
@@ -375,21 +399,19 @@ def plot_prediction(
             t_future,
             pred_vals[:, i],
             label="Prediction",
-            color="red",
             linestyle="--",
             linewidth=2,
         )
 
         ax.axvline(
             x=x_vals.shape[0] - 0.5,
-            color="blue",
             linestyle=":",
             alpha=0.5,
             label="Forecast start",
         )
 
         ax.set_title(f"Channel {ch_idx} (feature {feature_idx})")
-        ax.set_ylabel("Amplitude (normalized)")
+        ax.set_ylabel("Amplitude")
         ax.legend(fontsize=9)
         ax.grid(True, alpha=0.3)
 
@@ -397,9 +419,10 @@ def plot_prediction(
     plt.tight_layout()
     plt.show()
 
+    # MSE (если есть пересечение)
     if horizon <= y_sample.shape[1]:
         y_truth_overlap = y_sample[0, :horizon, channels, feature_idx]
-        mse = np.mean((pred_vals - y_truth_overlap) ** 2)
+        mse = np.mean((pred_vals - np.array(y_truth_overlap)) ** 2)
         print(f"MSE на горизонте {horizon}: {mse:.6f}")
 
 
