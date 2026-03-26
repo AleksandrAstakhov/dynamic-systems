@@ -298,8 +298,6 @@ from typing import Optional
 def _model_step(model, x_context):
     """Один шаг модели: принимает контекст, возвращает предсказание на следующий шаг."""
     out = model(x_context)
-    # Берем предсказание только для последнего временного шага
-    # out["prediction"]: (B, S, C, D) -> берем [:, -1, :, :] -> (B, 1, C, D)
     next_step = out["prediction"][:, -1:, :, :]
     return next_step
 
@@ -334,7 +332,7 @@ def plot_prediction(
     *,
     sample_idx: int = 0,
     channels: list[int] = [0, 1],
-    feature_idx: int = 0,
+    feature_idx: int = -1,
     horizon: Optional[int] = None,
     key: Optional[jax.Array] = None,
     figsize: tuple[int, int] = (12, 6),
@@ -346,8 +344,7 @@ def plot_prediction(
     if horizon is None:
         horizon = y_sample.shape[1]
 
-    with nnx.contextualize(model, rngs=nnx.Rngs(key or jax.random.key(0))):
-        pred_future = generate_trajectory(model, x_sample, horizon=horizon, key=key)
+    pred_future = generate_trajectory(model, x_sample, horizon=horizon)
 
     x_vals = np.array(x_sample[0, :, channels, feature_idx])
     y_vals = np.array(y_sample[0, :, channels, feature_idx])
