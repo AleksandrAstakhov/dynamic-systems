@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import flax.linen as nn
 from attention import MultiHeadAttention
 from positional_encoding import TimeSeriesPositionalEncoding
+from GRAND_jax import Grand, GrandDiffuser
 
 
 class MLP(nn.Module):
@@ -80,5 +81,44 @@ class STFormer(nn.Module):
         )
 
         h = jax.vmap(spatial_transformer, in_axes=1, out_axes=1, axis_size=S)(h)
+
+        return h
+
+
+class DiffGraphSTFormer(nn.Module):
+    num_heads: int
+    head_dim: int
+    mlp_dim: int
+
+    @nn.compact
+    def __call__(self, x):
+        B, S, C, D = x.shape
+
+        temp_transformer = nn.vmap(
+            Transformer,
+            variable_axes={"params": 0},
+            split_rngs={"params": True},
+            in_axes=2,
+            out_axes=2,
+        )(
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            mlp_dim=self.mlp_dim,
+            need_pos_enc=True,
+        )
+
+        h = temp_transformer(x)
+
+        spatial_model = Grand(
+            num_heads=self.num_heads,
+            head_dim=self.head_dim,
+            latent_dim=self.mlp_dim,
+            diffuser=GrandDiffuser,
+            out_dim=h.shape[-1]
+        )
+
+        h = jax.vmap(spatial_model, in_axes=(1, 1), out_axes=1, axis_size=S)(
+            h, jnp.broadcast_to(jnp.expand_dims(jnp.linspace(0, 1, 5), axis=0), (S, 5))
+        )
 
         return h

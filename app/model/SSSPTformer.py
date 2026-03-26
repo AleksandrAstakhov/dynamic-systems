@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import STFormer
+from STFormer import STFormer, DiffGraphSTFormer
 from VAE import VAE, vae_loss
 import matplotlib.pyplot as plt
 import optax
@@ -51,7 +51,7 @@ class SSSPformer(nn.Module):
         layers = []
         for _ in jnp.arange(self.num_layers):
             layers.append(
-                STFormer(
+                DiffGraphSTFormer(
                     num_heads=self.num_heads,
                     head_dim=self.head_dim,
                     mlp_dim=self.mlp_dim,
