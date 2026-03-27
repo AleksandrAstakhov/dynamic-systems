@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import STFormer, DiffGraphSTFormer
+from STFormer import STFormer, DiffGraphSTFormer, TFormer, GConvSTFormer
 from VAE import VAE
 import matplotlib.pyplot as plt
 import optax
@@ -453,7 +453,7 @@ class DataLoader:
             yield self.X[batch_idx], self.y[batch_idx]
 
 
-if __name__ == "__main__":
+def mian(mode_cls, batch_size):
 
     try:
         dataset = DS006940(cache_dir="./data")
@@ -505,6 +505,17 @@ if __name__ == "__main__":
     X_train = X[:split_norm]
     y_train = y[:split_norm]
 
+    corr = np.corrcoef(X_train, rowvar=False)
+
+    threshold = 0.7
+    adj = np.where(np.abs(corr) >= threshold, 1, 0)
+
+    np.fill_diagonal(adj, 0)
+
+    senders, receivers = np.nonzero(adj)
+
+    edge_index = np.stack([senders, receivers], axis=0)
+
     X_test = X[split_norm:]
     y_test = y[split_norm:]
 
@@ -515,7 +526,7 @@ if __name__ == "__main__":
     # MODEL (NNX)
     # -------------------------
 
-    model = STFormer(
+    model = mode_cls(
         in_dim=8,
         out_dim=8,
         model_dim=32,
@@ -524,10 +535,9 @@ if __name__ == "__main__":
         vae_latent=4,
         num_layers=2,
         num_chanels=64,
+        edge_index=edge_index,
         rngs=nnx.Rngs(params=0),
     )
-
-    batch_size = 32
 
     trained_model = train_model(
         model,
@@ -539,3 +549,15 @@ if __name__ == "__main__":
         epochs=40,
     )
     plot_prediction(model, X_test, y_test)
+
+
+if __name__ == "__main__":
+
+    for cls, bs in [
+        (TFormer, 32),
+        (STFormer, 32),
+        (GConvSTFormer, 32),
+        (DiffGraphSTFormer, 12),
+    ]:
+
+        mian(cls, bs)

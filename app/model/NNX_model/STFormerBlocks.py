@@ -5,7 +5,8 @@ from flax.nnx import bridge
 
 
 from positional_encoding import TimeSeriesPositionalEncoding
-from GRAND_jax import Grand, GrandDiffuser
+from graph_modules import Grand, GrandDiffuser
+from jraphx.nn.conv import TransformerConv
 
 from attention import MultiHeadAttention
 from utils import create_v_model
@@ -122,11 +123,15 @@ class STFormerBlock(nnx.Module):
 
     def __call__(self, x):
 
+        B, S, C, D = x.shape
+
         h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
             self.temporal_transformer, x
         )
 
-        h = nnx.vmap(lambda d : self.spatial_transformer(d), in_axes=1, out_axes=1)(h)
+        h = h.reshape(B * S, C, D)
+
+        h = self.spatial_transformer(h).reshape(B, S, C, D)
 
         res = h
         h = self.ln(h)
@@ -192,14 +197,12 @@ class DiffGraphSTFormerBlock(nnx.Module):
         t_grid = jnp.linspace(0, 0.5, 4)
 
         h = self.spatial_model(h, t_grid)
-        
 
         res = h
         h = self.ln(h)
         out = self.mlp(h)
 
         return out + res
-
 
 
 class TFormerBlock(nnx.Module):
@@ -261,4 +264,270 @@ class TFormerBlock(nnx.Module):
         h = self.mlp(h)
 
         return h + res
-    
+
+
+class LightSTFormerBlock(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        num_chanels,
+        *,
+        rngs: nnx.Rngs
+    ):
+
+        self.spatial_transformer = Transformer(
+            in_dim=model_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=False,
+            rngs=rngs,
+        )
+
+        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
+
+        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
+
+        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+
+        self.temporal_transformer = Transformer(
+            in_dim=in_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=True,
+            rngs=rngs,
+        )
+
+        nnx.restore_rngs(backup)
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+    def __call__(self, x):
+        B, S, C, D = x.shape
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        h = (
+            self.temporal_transformer(x)
+            .reshape(B, C, S, D)
+            .transpose(0, 2, 1, 3)
+            .reshape(B * S, C, D)
+        )
+
+        h = self.spatial_transformer(h).reshape(B, S, C, D)
+
+        res = h
+        h = self.ln(h)
+        h = self.mlp(h)
+
+        return h + res
+
+
+class LightDiffGraphSTFormerBlock(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        num_chanels,
+        *,
+        rngs: nnx.Rngs
+    ):
+
+        self.spatial_model = Grand(
+            in_dim=model_dim,
+            model_dim=model_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            head_dim=head_dim,
+            num_chanels=num_chanels,
+            rngs=rngs,
+        )
+
+        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
+
+        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
+
+        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+
+        self.temporal_transformer = Transformer(
+            in_dim=in_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=True,
+            rngs=rngs,
+        )
+
+        nnx.restore_rngs(backup)
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        B, S, C, D = x.shape
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        h = self.temporal_transformer(x).reshape(B, C, S, D).transpose(0, 2, 1, 3)
+
+        t_grid = jnp.linspace(0, 0.5, 4)
+
+        h = self.spatial_model(h, t_grid)
+
+        res = h
+        h = self.ln(h)
+        out = self.mlp(h)
+
+        return out + res
+
+
+class LightTFormerBlock(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        num_chanels,
+        *,
+        rngs: nnx.Rngs
+    ):
+
+        self.spatial_transformer = Transformer(
+            in_dim=model_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=False,
+            rngs=rngs,
+        )
+
+        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
+
+        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
+
+        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+
+        self.temporal_transformer = Transformer(
+            in_dim=in_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=True,
+            rngs=rngs,
+        )
+
+        nnx.restore_rngs(backup)
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+    def __call__(self, x):
+        B, S, C, D = x.shape
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        h = self.temporal_transformer(x).reshape(B, C, S, D).transpose(0, 2, 1, 3)
+
+        res = h
+        h = self.ln(h)
+        h = self.mlp(h)
+
+        return h + res
+
+
+class LightGConvSTFormerBlock(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        edge_index,
+        *,
+        rngs: nnx.Rngs
+    ):
+
+        self.spatial_model = TransformerConv(
+            in_features=model_dim,
+            out_features=model_dim,
+            heads=num_heads,
+            rngs=rngs,
+        )
+
+        self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
+
+        self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
+
+        self.temporal_transformer = Transformer(
+            in_dim=in_dim,
+            out_dim=model_dim,
+            num_heads=num_heads,
+            model_dim=model_dim,
+            head_dim=head_dim,
+            need_pos_enc=True,
+            rngs=rngs,
+        )
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+        self.edge_index = edge_index
+
+    def __batch_edge_index(edge_index: jnp.ndarray, num_nodes: int, batch_size: int):
+
+        E = edge_index.shape[1]
+
+        offsets = jnp.arange(batch_size) * num_nodes
+
+        offsets = offsets[:, None]
+
+        edge_index_expanded = edge_index[None, :, :]
+
+        edge_index_batched = edge_index_expanded + offsets[:, None, :]
+
+        edge_index_batched = edge_index_batched.transpose(1, 0, 2).reshape(2, -1)
+
+        return edge_index_batched
+
+    def __call__(
+        self,
+        x: jnp.ndarray,
+        edge_index: jnp.ndarray,
+    ) -> jax.Array:
+        B, S, C, D = x.shape
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+
+        h = (
+            self.temporal_transformer(x)
+            .reshape(B, C, S, D)
+            .transpose(0, 2, 1, 3)
+            .reshape(B * S * C, D)
+        )
+
+        edge_index = self.__batch_edge_index(self.edge_index, C, B * S)
+
+        h = self.spatial_model(h, edge_index).reshape(B, S, C, D)
+
+        res = h
+        h = self.ln(h)
+        out = self.mlp(h)
+
+        return out + res

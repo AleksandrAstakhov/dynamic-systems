@@ -2,7 +2,15 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormerBlocks import STFormerBlock, DiffGraphSTFormerBlock, TFormerBlock
+from STFormerBlocks import (
+    STFormerBlock,
+    DiffGraphSTFormerBlock,
+    TFormerBlock,
+    LightGConvSTFormerBlock,
+    LightSTFormerBlock,
+    LightTFormerBlock,
+    LightDiffGraphSTFormerBlock,
+)
 from VAE import VAE
 import matplotlib.pyplot as plt
 import optax
@@ -33,13 +41,14 @@ class STFormer(nnx.Module):
         vae_latent,
         num_layers,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs,
     ):
 
         self.model_layers = nnx.Sequential(
             *[
-                STFormerBlock(
+                LightSTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
@@ -138,6 +147,7 @@ class DiffGraphSTFormer(STFormer):
         vae_latent,
         num_layers,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs,
     ):
@@ -155,7 +165,7 @@ class DiffGraphSTFormer(STFormer):
 
         self.model_layers = nnx.Sequential(
             *[
-                DiffGraphSTFormerBlock(
+                LightDiffGraphSTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
@@ -167,6 +177,7 @@ class DiffGraphSTFormer(STFormer):
                 for i in range(num_layers)
             ]
         )
+
 
 class TFormer(nnx.Module):
 
@@ -180,19 +191,127 @@ class TFormer(nnx.Module):
         vae_latent,
         num_layers,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs,
     ):
 
         self.model_layers = nnx.Sequential(
             *[
-                TFormerBlock(
+                LightTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
+                    rngs=rngs,
+                )
+                for i in range(num_layers)
+            ]
+        )
+
+        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+
+        self.vae = create_v_model(
+            rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
+        )
+
+        self.mu_proj = create_v_model(
+            rngs,
+            nnx.Linear,
+            model_args={"in_features": model_dim, "out_features": vae_latent},
+        )
+
+        self.logvar_prog = create_v_model(
+            rngs,
+            nnx.Linear,
+            model_args={"in_features": model_dim, "out_features": vae_latent},
+        )
+
+        self.out_proj = create_v_model(
+            rngs,
+            nnx.Linear,
+            model_args={"in_features": vae_latent, "out_features": out_dim},
+        )
+
+        nnx.restore_rngs(backup)
+
+        self.rngs = nnx.Rngs(rngs.params())
+
+    def __call__(self, x):
+
+        B, S, C, D = x.shape
+
+        x_ = x.reshape(B * S, C, D)
+
+        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1)(
+            self.vae, x_
+        )
+
+        recon = recon.reshape(B, S, C, D)
+
+        # mu_ = mu.reshape(B, S, C, -1)
+        # logvar_ = logvar.reshape(B, S, C, -1)
+
+        # z = mu_ + logvar_ * rngs
+        z = mu.reshape(B, S, C, -1)
+
+        p = self.model_layers(z).reshape(B * S, C, -1)
+
+        mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.mu_proj, p
+        )
+        logvar_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.logvar_prog, p
+        )
+
+        sigma = jax.nn.softplus(logvar_pred) + 1e-4
+        eps = self.rngs.normal(shape=mu_pred.shape)
+
+        z_next = mu_pred + sigma * eps
+
+        out = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
+            self.out_proj, z_next
+        ).reshape(B, S, C, -1)
+
+        return {
+            "prediction": out,
+            "reconstruction": recon,
+            "mu": mu,
+            "logvar": logvar,
+            "mu_pred": mu_pred,
+            "sigma": sigma,
+        }
+
+
+class GConvSTFormer(nnx.Module):
+
+    def __init__(
+        self,
+        in_dim,
+        out_dim,
+        model_dim,
+        num_heads,
+        head_dim,
+        vae_latent,
+        num_layers,
+        num_chanels,
+        edge_index,
+        *,
+        rngs: nnx.Rngs,
+    ):
+
+        self.model_layers = nnx.Sequential(
+            *[
+                LightGConvSTFormerBlock(
+                    in_dim=vae_latent if i == 0 else model_dim,
+                    out_dim=model_dim,
+                    model_dim=model_dim,
+                    num_heads=num_heads,
+                    head_dim=head_dim,
+                    num_chanels=num_chanels,
+                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)
