@@ -61,7 +61,6 @@ class STFormer(nnx.Module):
             ]
         )
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
         self.vae = create_v_model(
             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
@@ -85,7 +84,6 @@ class STFormer(nnx.Module):
             model_args={"in_features": vae_latent, "out_features": out_dim},
         )
 
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
@@ -211,8 +209,6 @@ class TFormer(nnx.Module):
             ]
         )
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
-
         self.vae = create_v_model(
             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
         )
@@ -235,7 +231,6 @@ class TFormer(nnx.Module):
             model_args={"in_features": vae_latent, "out_features": out_dim},
         )
 
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
@@ -318,8 +313,6 @@ class GConvSTFormer(nnx.Module):
             ]
         )
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
-
         self.vae = create_v_model(
             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
         )
@@ -342,7 +335,6 @@ class GConvSTFormer(nnx.Module):
             model_args={"in_features": vae_latent, "out_features": out_dim},
         )
 
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
