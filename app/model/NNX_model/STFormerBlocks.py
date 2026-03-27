@@ -294,7 +294,6 @@ class LightSTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
         self.temporal_transformer = Transformer(
             in_dim=in_dim,
@@ -305,8 +304,6 @@ class LightSTFormerBlock(nnx.Module):
             need_pos_enc=True,
             rngs=rngs,
         )
-
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
@@ -359,7 +356,6 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
         self.temporal_transformer = Transformer(
             in_dim=in_dim,
@@ -371,7 +367,6 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
@@ -421,7 +416,6 @@ class LightTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
 
         self.temporal_transformer = Transformer(
             in_dim=in_dim,
@@ -432,8 +426,6 @@ class LightTFormerBlock(nnx.Module):
             need_pos_enc=True,
             rngs=rngs,
         )
-
-        nnx.restore_rngs(backup)
 
         self.rngs = nnx.Rngs(rngs.params())
 
