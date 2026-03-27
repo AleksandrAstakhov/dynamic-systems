@@ -308,16 +308,16 @@ class LightSTFormerBlock(nnx.Module):
     def __call__(self, x):
         B, S, C, D = x.shape
 
-        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, -1)
 
         h = (
             self.temporal_transformer(x)
-            .reshape(B, C, S, D)
+            .reshape(B, C, S, -1)
             .transpose(0, 2, 1, 3)
-            .reshape(B * S, C, D)
+            .reshape(B * S, C, -1)
         )
 
-        h = self.spatial_transformer(h).reshape(B, S, C, D)
+        h = self.spatial_transformer(h).reshape(B, S, C, -1)
 
         res = h
         h = self.ln(h)
@@ -373,7 +373,7 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
 
-        h = self.temporal_transformer(x).reshape(B, C, S, D).transpose(0, 2, 1, 3)
+        h = self.temporal_transformer(x).reshape(B, C, S, -1).transpose(0, 2, 1, 3)
 
         t_grid = jnp.linspace(0, 0.5, 4)
 
@@ -432,7 +432,7 @@ class LightTFormerBlock(nnx.Module):
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
 
-        h = self.temporal_transformer(x).reshape(B, C, S, D).transpose(0, 2, 1, 3)
+        h = self.temporal_transformer(x).reshape(B, C, S, -1).transpose(0, 2, 1, 3)
 
         res = h
         h = self.ln(h)
@@ -507,14 +507,14 @@ class LightGConvSTFormerBlock(nnx.Module):
 
         h = (
             self.temporal_transformer(x)
-            .reshape(B, C, S, D)
+            .reshape(B, C, S, -1)
             .transpose(0, 2, 1, 3)
-            .reshape(B * S * C, D)
+            .reshape(B * S * C, -1)
         )
 
         edge_index = self.__batch_edge_index(self.edge_index, C, B * S)
 
-        h = self.spatial_model(h, edge_index).reshape(B, S, C, D)
+        h = self.spatial_model(h, edge_index).reshape(B, S, C, -1)
 
         res = h
         h = self.ln(h)
