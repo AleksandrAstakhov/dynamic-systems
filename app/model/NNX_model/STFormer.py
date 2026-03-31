@@ -51,14 +51,13 @@ class STFormer(nnx.Module):
 
         self.model_layers = nnx.Sequential(
             *[
-                LightSTFormerBlock(
+                STFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
-                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)

@@ -149,7 +149,6 @@ class DiffGraphSTFormerBlock(nnx.Module):
         num_heads,
         head_dim,
         num_chanels,
-        edge_index,
         *,
         rngs: nnx.Rngs
     ):
@@ -187,7 +186,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, t, x: jax.Array, arg) -> jax.Array:
+    def __call__(self, x: jax.Array) -> jax.Array:
         B, S, S, D = x.shape
 
         h = self.temporal_transformer(x.transpose(0, 2, 1, 3).reshape())
