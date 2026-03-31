@@ -149,6 +149,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
         num_heads,
         head_dim,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs
     ):
@@ -167,7 +168,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+        backup = nnx.split_rngs(rngs, splits=num_chanels)
 
         self.temporal_transformer = create_v_model(
             rngs,
@@ -186,12 +187,10 @@ class DiffGraphSTFormerBlock(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, x: jax.Array) -> jax.Array:
-        _, S, _, _ = x.shape
+    def __call__(self, t, x: jax.Array, arg) -> jax.Array:
+        B, S, S, D = x.shape
 
-        h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
-            self.temporal_transformer, x
-        )
+        h = self.temporal_transformer(x.transpose(0, 2, 1, 3).reshape())
 
         t_grid = jnp.linspace(0, 0.5, 4)
 
@@ -201,7 +200,7 @@ class DiffGraphSTFormerBlock(nnx.Module):
         h = self.ln(h)
         out = self.mlp(h)
 
-        return out + res
+        return out
 
 
 class TFormerBlock(nnx.Module):
@@ -274,6 +273,7 @@ class LightSTFormerBlock(nnx.Module):
         num_heads,
         head_dim,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs
     ):
@@ -305,7 +305,7 @@ class LightSTFormerBlock(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, x):
+    def __call__(self, t, x, arg):
         B, S, C, D = x.shape
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, -1)
@@ -323,7 +323,7 @@ class LightSTFormerBlock(nnx.Module):
         h = self.ln(h)
         h = self.mlp(h)
 
-        return h + res
+        return h
 
 
 class LightDiffGraphSTFormerBlock(nnx.Module):
@@ -336,6 +336,7 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
         num_heads,
         head_dim,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs
     ):
@@ -368,7 +369,7 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, x: jax.Array) -> jax.Array:
+    def __call__(self, t, x, arg) -> jax.Array:
         B, S, C, D = x.shape
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
@@ -383,7 +384,7 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
         h = self.ln(h)
         out = self.mlp(h)
 
-        return out + res
+        return out
 
 
 class LightTFormerBlock(nnx.Module):
@@ -396,6 +397,7 @@ class LightTFormerBlock(nnx.Module):
         num_heads,
         head_dim,
         num_chanels,
+        edge_index,
         *,
         rngs: nnx.Rngs
     ):
@@ -438,7 +440,7 @@ class LightTFormerBlock(nnx.Module):
         h = self.ln(h)
         h = self.mlp(h)
 
-        return h + res
+        return h
 
 
 class LightGConvSTFormerBlock(nnx.Module):

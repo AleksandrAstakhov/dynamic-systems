@@ -2,7 +2,8 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import STFormer, DiffGraphSTFormer, TFormer, GConvSTFormer
+from STFormer import STFormer, DiffGraphSTFormer, TFormer, GConvSTFormer, SDESTFormer
+from STFormerBlocks import DiffGraphSTFormerBlock, LightDiffGraphSTFormerBlock, LightSTFormerBlock, LightTFormerBlock
 from VAE import VAE
 import matplotlib.pyplot as plt
 import optax
@@ -153,43 +154,24 @@ def loss_fn(model, x, y):
     # 3. Latent target
     # -------------------------
     # берем target latent (сдвиг по времени)
-    z_target = mu[:, 1:]  # teacher forcing
+    # z_target = mu[:, 1:]  # teacher forcing
 
-    mu_pred = mu_pred[:, :-1]
-    sigma = sigma[:, :-1]
+    # mu_pred = mu_pred[:, :-1]
+    # sigma = sigma[:, :-1]
 
     # -------------------------
     # 4. SDE loss (Gaussian NLL)
     # -------------------------
-    sde_loss = jnp.mean(((z_target - mu_pred) ** 2) / (sigma**2) + jnp.log(sigma**2))
+    # sde_loss = jnp.mean(((y - mu_pred) ** 2) / (sigma**2) + jnp.log(sigma**2))
 
     # -------------------------
     # 5. (опционально) prediction loss в x-space
     # -------------------------
-    pred_loss = jnp.mean((y[:, -1, :, :] - prediction[:, -1, :, :]) ** 2)
+    pred_loss = jnp.mean((y - prediction) ** 2)
 
-    loss = recon_loss + kl + sde_loss + pred_loss
+    loss =  recon_loss + pred_loss + recon_loss + kl
 
     return loss
-
-
-# @partial(jax.jit, static_argnums=(0, 6))
-# def train_step(model, params, key, opt_state, x, y, optimizer):
-#     loss, grads = jax.value_and_grad(loss_fn)(params, model, x, y, key)
-#     updates, opt_state = optimizer.update(grads, opt_state)
-#     params = optax.apply_updates(params, updates)
-#     return params, opt_state, loss
-
-
-# @partial(jax.jit, static_argnums=(0,))
-# def eval_step(model, params, key, x, y):
-#     return loss_fn(params, model, x, y, key)
-
-
-# @partial(jax.jit, static_argnums=(0,))
-# def predict(model, params, key, x):
-#     out = model.apply(params, x, key)
-#     return out["prediction"]
 
 
 @nnx.jit
@@ -220,9 +202,10 @@ def train_model(
     epochs,
 ):
 
-    rngs = jax.random.key(0)
-
     optimizer = nnx.Optimizer(model, optax.adam(1e-3), wrt=nnx.Param)
+
+    train_history = []
+    val_history = []
 
     for epoch in tqdm(range(epochs)):
 
@@ -256,152 +239,42 @@ def train_model(
 
         val_loss = jnp.mean(jnp.stack(val_losses))
 
+
+        train_history.append(train_loss)
+        val_history.append(val_loss)
+
         print(f"Epoch {epoch+1} | train {train_loss:.4f} | val {val_loss:.4f}")
 
-    return model
-
-
-# def plot_prediction(model, params, x_test, y_test):
-
-#     key = jax.random.key(0)
-
-#     sample = x_test[0:1]
-
-#     pred = predict(model, params, key, sample)
-
-#     pred = np.array(pred[0])
-#     truth = np.array(y_test[0])
-
-#     # берём два канала
-#     channels = [0, 1]
-
-#     for ch in channels:
-
-#         plt.figure(figsize=(10, 4))
-
-#         plt.plot(truth[:, ch, 0], label="truth")
-#         plt.plot(pred[:, ch, 0], label="prediction")
-
-#         plt.title(f"Channel {ch}")
-#         plt.legend()
-
-#         plt.show()
-
-import jax
-import jax.numpy as jnp
-import numpy as np
-import matplotlib.pyplot as plt
-from typing import Optional
-
+    return model, train_history, val_history
 
 @nnx.jit
-def _model_step(model, x_context):
-    """Один шаг модели: принимает контекст, возвращает предсказание на следующий шаг."""
-    out = model(x_context)
-    next_step = out["prediction"][:, -1:, :, :]
-    return next_step
+def eval_step(model, x, y, horizon=20):
+
+    def rollout(x_init):
+        x_curr = x_init
+        preds = []
+
+        for _ in range(horizon):
+            out = model(x_curr)
 
 
-def generate_trajectory(
-    model,
-    x_init: jnp.ndarray,
-    horizon: int,
-    *,
-    key: Optional[jax.Array] = None,
-    denoise: bool = True,
-) -> jnp.ndarray:
-    B, S, C, D = x_init.shape
-    current_ctx = x_init
+            pred = out["prediction"][:, -1:]  # (B, 1, C, D)
 
-    generated = []
-
-    for _ in range(horizon):
-
-        next_step = _model_step(model, current_ctx)
-        generated.append(next_step)
-
-        current_ctx = jnp.concatenate([current_ctx[:, 1:, :, :], next_step], axis=1)
-
-    return jnp.concatenate(generated, axis=1)
+            preds.append(pred)
 
 
-def plot_prediction(
-    model,
-    x_test: jnp.ndarray,
-    y_test: jnp.ndarray,
-    *,
-    sample_idx: int = 0,
-    channels: list[int] = [0, 1],
-    feature_idx: int = -1,
-    horizon: Optional[int] = None,
-    key: Optional[jax.Array] = None,
-    figsize: tuple[int, int] = (12, 6),
-):
+            x_curr = jnp.concatenate([x_curr[:, 1:], pred], axis=1)
 
-    x_sample = x_test[sample_idx : sample_idx + 1]
-    y_sample = y_test[sample_idx : sample_idx + 1]
+        return jnp.concatenate(preds, axis=1)  # (B, horizon, C, D)
 
-    if horizon is None:
-        horizon = y_sample.shape[1]
+    preds = rollout(x)
 
-    pred_future = generate_trajectory(model, x_sample, horizon=horizon)
+    # сравниваем с реальным будущим
+    y_target = y[:, :horizon]
 
-    x_vals = np.array(x_sample[0, :, channels, feature_idx])
-    y_vals = np.array(y_sample[0, :, channels, feature_idx])
-    pred_vals = np.array(pred_future[0, :, channels, feature_idx])
+    mse = jnp.mean((preds - y_target) ** 2)
 
-    t_context = np.arange(x_vals.shape[0])
-    t_future = np.arange(x_vals.shape[0], x_vals.shape[0] + pred_vals.shape[0])
-
-    n_channels = len(channels)
-    fig, axes = plt.subplots(n_channels, 1, figsize=figsize, sharex=True)
-    if n_channels == 1:
-        axes = [axes]
-
-    for i, (ch_idx, ax) in enumerate(zip(channels, axes)):
-        ax.plot(
-            t_context, x_vals[:, i], label="Input (context)", color="gray", linewidth=1
-        )
-        ax.plot(
-            np.arange(x_vals.shape[0], x_vals.shape[0] + y_vals.shape[0]),
-            y_vals[:, i],
-            label="Ground Truth",
-            color="green",
-            linewidth=2,
-            alpha=0.7,
-        )
-
-        ax.plot(
-            t_future,
-            pred_vals[:, i],
-            label="Prediction",
-            color="red",
-            linestyle="--",
-            linewidth=2,
-        )
-
-        ax.axvline(
-            x=x_vals.shape[0] - 0.5,
-            color="blue",
-            linestyle=":",
-            alpha=0.5,
-            label="Forecast start",
-        )
-
-        ax.set_title(f"Channel {ch_idx} (feature {feature_idx})")
-        ax.set_ylabel("Amplitude (normalized)")
-        ax.legend(fontsize=9)
-        ax.grid(True, alpha=0.3)
-
-    axes[-1].set_xlabel("Time step")
-    plt.tight_layout()
-    plt.show()
-
-    if horizon <= y_sample.shape[1]:
-        y_truth_overlap = y_sample[0, :horizon, channels, feature_idx]
-        mse = np.mean((pred_vals - y_truth_overlap) ** 2)
-        print(f"MSE на горизонте {horizon}: {mse:.6f}")
-
+    return mse
 
 def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
 
@@ -452,6 +325,22 @@ class DataLoader:
             batch_idx = indices[start : start + self.batch_size]
             yield self.X[batch_idx], self.y[batch_idx]
 
+def plot_losses(train_history, val_history, save_path="losses.png"):
+
+    train_history = np.array(train_history)
+    val_history = np.array(val_history)
+
+    plt.figure()
+    plt.plot(train_history, label="train")
+    plt.plot(val_history, label="val (rollout)")
+    plt.xlabel("Epoch")
+    plt.ylabel("Loss")
+    plt.legend()
+    plt.grid()
+
+    plt.savefig(save_path)
+    plt.close()
+
 
 def mian(mode_cls, batch_size):
 
@@ -461,7 +350,7 @@ def mian(mode_cls, batch_size):
         raw.load_data()
         raw.filter(1, 40)
 
-        data = raw.get_data().T[:2000]
+        data = raw.get_data().T[:3000]
 
     except ImportError:
         print("DS006940 не найден, используем синтетические данные")
@@ -493,19 +382,18 @@ def mian(mode_cls, batch_size):
     # -------------------------
     # DATASET
     # -------------------------
-    window_size = 20
-    horizon = 5
+    window_size = 50
+    horizon = 1
 
-    X, y = create_dataset(X_embedded, window=window_size, horizon=horizon)
+    X_embedded_train = X_embedded[:split_norm]
 
-    print("Dataset:", X.shape, y.shape)
+    X_train, y_train = create_dataset(X_embedded_train, window=window_size, horizon=horizon)
 
-    split_norm = int(len(X) * 0.8)
+    X_embedded_test = X_embedded[split_norm:]
 
-    X_train = X[:split_norm]
-    y_train = y[:split_norm]
+    X_test, y_test = create_dataset(X_embedded_test, window=window_size, horizon=horizon)
 
-    corr = np.corrcoef(X_train, rowvar=False)
+    corr = np.corrcoef(data, rowvar=False)
 
     threshold = 0.7
     adj = np.where(np.abs(corr) >= threshold, 1, 0)
@@ -515,9 +403,6 @@ def mian(mode_cls, batch_size):
     senders, receivers = np.nonzero(adj)
 
     edge_index = np.stack([senders, receivers], axis=0)
-
-    X_test = X[split_norm:]
-    y_test = y[split_norm:]
 
     print(f"Train: {X_train.shape}, {y_train.shape}")
     print(f"Test: {X_test.shape}, {y_test.shape}")
@@ -529,17 +414,17 @@ def mian(mode_cls, batch_size):
     model = mode_cls(
         in_dim=8,
         out_dim=8,
-        model_dim=32,
-        num_heads=5,
+        model_dim=10,
+        num_heads=4,
         head_dim=8,
         vae_latent=4,
-        num_layers=2,
+        num_layers=1,
         num_chanels=64,
         edge_index=edge_index,
-        rngs=nnx.Rngs(params=0),
+        rngs=nnx.Rngs(0),
     )
 
-    trained_model = train_model(
+    trained_model, tl, vl = train_model(
         model,
         X_train,
         y_train,
@@ -548,7 +433,7 @@ def mian(mode_cls, batch_size):
         batch_size,
         epochs=40,
     )
-    plot_prediction(model, X_test, y_test)
+    plot_losses(tl, vl)
 
 
 if __name__ == "__main__":
