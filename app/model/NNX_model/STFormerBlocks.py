@@ -53,7 +53,7 @@ class Transformer(nnx.Module):
         self.ln2 = nnx.LayerNorm(model_dim, rngs=rngs)
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, x):
 
@@ -101,7 +101,7 @@ class STFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+        backup = nnx.split_rngs(rngs, splits=num_chanels)
 
         self.temporal_transformer = create_v_model(
             rngs,
@@ -118,7 +118,7 @@ class STFormerBlock(nnx.Module):
 
         nnx.restore_rngs(backup)
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, x):
 
@@ -128,15 +128,15 @@ class STFormerBlock(nnx.Module):
             self.temporal_transformer, x
         )
 
-        h = h.reshape(B * S, C, D)
+        h = h.reshape(B * S, C, -1)
 
-        h = self.spatial_transformer(h).reshape(B, S, C, D)
+        h = self.spatial_transformer(h).reshape(B, S, C, -1)
 
         res = h
         h = self.ln(h)
         h = self.mlp(h)
 
-        return h + res
+        return h
 
 
 class DiffGraphSTFormerBlock(nnx.Module):
@@ -184,12 +184,14 @@ class DiffGraphSTFormerBlock(nnx.Module):
 
         nnx.restore_rngs(backup)
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, x: jax.Array) -> jax.Array:
         B, S, S, D = x.shape
 
-        h = self.temporal_transformer(x.transpose(0, 2, 1, 3).reshape())
+        h = nnx.vmap(lambda model, x: model(x), in_axes=(0, 2), out_axes=2)(
+            self.temporal_transformer, x
+        )
 
         t_grid = jnp.linspace(0, 0.5, 4)
 
@@ -230,7 +232,7 @@ class TFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+        backup = nnx.split_rngs(rngs, splits=num_chanels)
 
         self.temporal_transformer = create_v_model(
             rngs,
@@ -247,7 +249,7 @@ class TFormerBlock(nnx.Module):
 
         nnx.restore_rngs(backup)
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, x):
 
@@ -302,7 +304,7 @@ class LightSTFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, t, x, arg):
         B, S, C, D = x.shape
@@ -366,7 +368,7 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
         )
 
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, t, x, arg) -> jax.Array:
         B, S, C, D = x.shape
@@ -426,7 +428,7 @@ class LightTFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
     def __call__(self, x):
         B, S, C, D = x.shape
@@ -477,7 +479,7 @@ class LightGConvSTFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
-        self.rngs = nnx.Rngs(rngs.params())
+        self.rngs = nnx.Rngs(rngs())
 
         self.edge_index = edge_index
 

@@ -2,8 +2,20 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import STFormer, DiffGraphSTFormer, TFormer, GConvSTFormer, SDESTFormer
-from STFormerBlocks import DiffGraphSTFormerBlock, LightDiffGraphSTFormerBlock, LightSTFormerBlock, LightTFormerBlock
+from STFormer import (
+    STFormer,
+    DiffGraphSTFormer,
+    TFormer,
+    GConvSTFormer,
+    SDESTFormer,
+    VectorVAE,
+)
+from STFormerBlocks import (
+    DiffGraphSTFormerBlock,
+    LightDiffGraphSTFormerBlock,
+    LightSTFormerBlock,
+    LightTFormerBlock,
+)
 from VAE import VAE
 import matplotlib.pyplot as plt
 import optax
@@ -20,115 +32,115 @@ from flax import nnx
 from utils import create_v_model
 
 
-base_key = jax.random.key(42)
+def vae_train_model(
+    x_train,
+    y_train,
+    x_test,
+    y_test,
+    batch_size,
+    in_dim,
+    latent_dim,
+    num_channels,
+    num_epochs=10,
+    lr=1e-3,
+    seed=0,
+):
+    train_loader = DataLoader(x_train, y_train, batch_size)
+    val_loader = DataLoader(x_test, y_test, batch_size, shuffle=False)
+
+    rngs = nnx.Rngs(seed)
+
+    model = VectorVAE(
+        in_dim=in_dim,
+        vae_latent=latent_dim,
+        num_chanels=num_channels,
+        rngs=rngs,
+    )
+
+    optimizer = nnx.Optimizer(
+        model,
+        optax.chain(
+            optax.clip_by_global_norm(1.0),
+            optax.adam(lr),
+        ),
+        wrt=nnx.Param,
+    )
+
+    def vae_loss_fn(model, x):
+        recon, mu, logvar, _ = model(x)
+
+        recon_loss = jnp.mean((x - recon) ** 2)
+
+        kl_loss = -0.5 * jnp.mean(1 + logvar - mu**2 - jnp.exp(logvar))
+
+        loss = recon_loss + kl_loss
+        return loss, (recon_loss, kl_loss)
+
+    @nnx.jit
+    def train_step(model, optimizer, x):
+
+        def loss_fn(model):
+            return vae_loss_fn(model, x)
+
+        (loss, (recon_loss, kl_loss)), grads = nnx.value_and_grad(
+            loss_fn, has_aux=True
+        )(model)
+
+        optimizer.update(model, grads)
+
+        return loss, recon_loss, kl_loss
+
+    @nnx.jit
+    def eval_step(model, x):
+        loss, (recon_loss, kl_loss) = vae_loss_fn(model, x)
+        return loss, recon_loss, kl_loss
+
+    for epoch in range(num_epochs):
+
+        # ===== TRAIN =====
+        train_loss = 0.0
+        train_recon = 0.0
+        train_kl = 0.0
+        n_train = 0
+
+        for x, y in train_loader:
+
+            loss, recon_loss, kl_loss = train_step(model, optimizer, x)
+
+            train_loss += loss
+            train_recon += recon_loss
+            train_kl += kl_loss
+            n_train += 1
+
+        # ===== VALIDATION =====
+        val_loss = 0.0
+        val_recon = 0.0
+        val_kl = 0.0
+        n_val = 0
+
+        for x, y in val_loader:
+
+            loss, recon_loss, kl_loss = eval_step(model, x)
+
+            val_loss += loss
+            val_recon += recon_loss
+            val_kl += kl_loss
+            n_val += 1
+
+        print(
+            f"Epoch {epoch}: "
+            f"train_loss={train_loss / n_train:.4f}, "
+            f"val_loss={val_loss / n_val:.4f} | "
+            f"train_recon={train_recon / n_train:.4f}, "
+            f"val_recon={val_recon / n_val:.4f} | "
+            f"train_kl={train_kl / n_train:.4f}, "
+            f"val_kl={val_kl / n_val:.4f}"
+        )
+
+    return model
 
 
-# class SSSPformer(nnx.Module):
-
-#     def __init__(
-#         self,
-#         in_dim,
-#         out_dim,
-#         model_dim,
-#         num_heads,
-#         head_dim,
-#         vae_latent,
-#         num_layers,
-#         num_chanels,
-#         *,
-#         rngs: nnx.Rngs,
-#     ):
-
-#         self.model_layers = nnx.Sequential(
-#             *[
-#                 DiffGraphSTFormer(
-#                     in_dim=vae_latent if i == 0 else model_dim,
-#                     out_dim=model_dim,
-#                     model_dim=model_dim,
-#                     num_heads=num_heads,
-#                     head_dim=head_dim,
-#                     num_chanels=num_chanels,
-#                     rngs=rngs,
-#                 )
-#                 for i in range(num_layers)
-#             ]
-#         )
-
-#         backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
-
-#         self.vae = create_v_model(
-#             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
-#         )
-
-#         self.mu_proj = create_v_model(
-#             rngs,
-#             nnx.Linear,
-#             model_args={"in_features": model_dim, "out_features": vae_latent},
-#         )
-
-#         self.logvar_prog = create_v_model(
-#             rngs,
-#             nnx.Linear,
-#             model_args={"in_features": model_dim, "out_features": vae_latent},
-#         )
-
-#         self.out_proj = create_v_model(
-#             rngs,
-#             nnx.Linear,
-#             model_args={"in_features": vae_latent, "out_features": out_dim},
-#         )
-
-#         nnx.restore_rngs(backup)
-
-#         self.rngs = nnx.Rngs(rngs.params())
-
-#     def __call__(self, x):
-
-#         B, S, C, D = x.shape
-
-#         x_ = x.reshape(B * S, C, D)
-
-#         recon, mu, logvar = nnx.vmap(
-#             lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1
-#         )(self.vae, x_)
-
-#         recon = recon.reshape(B, S, C, D)
-
-#         # mu_ = mu.reshape(B, S, C, -1)
-#         # logvar_ = logvar.reshape(B, S, C, -1)
-
-#         # z = mu_ + logvar_ * rngs
-#         z = mu.reshape(B, S, C, -1)
-
-#         p = self.model_layers(z).reshape(B * S, C, -1)
-
-#         mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-#             self.mu_proj, p
-#         )
-#         logvar_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-#             self.logvar_prog, p
-#         )
-
-#         sigma = jax.nn.softplus(logvar_pred) + 1e-4
-#         eps = self.rngs.normal(shape=mu_pred.shape)
-
-#         z_next = mu_pred + sigma * eps
-
-#         out = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
-#             self.out_proj, z_next
-#         ).reshape(B, S, C, -1)
-
-#         return {
-#             "prediction": out,
-#             "reconstruction": recon,
-#             "mu": mu,
-#             "logvar": logvar,
-#             "mu_pred": mu_pred,
-#             "sigma": sigma,
-#         }
-
-
-def loss_fn(model, x, y):
+def loss_fn(model, x, y, horizon=1):
     out = model(x)
 
     prediction = out["prediction"]
@@ -162,14 +174,15 @@ def loss_fn(model, x, y):
     # -------------------------
     # 4. SDE loss (Gaussian NLL)
     # -------------------------
-    # sde_loss = jnp.mean(((y - mu_pred) ** 2) / (sigma**2) + jnp.log(sigma**2))
+    # B, S, C, D = y.shape
+    # sde_loss = jnp.mean(((y.reshape(B * S, C, -1) - mu_pred) ** 2) / (sigma**2) + jnp.log(sigma**2))
 
     # -------------------------
     # 5. (опционально) prediction loss в x-space
     # -------------------------
-    pred_loss = jnp.mean((y - prediction) ** 2)
+    pred_loss = jnp.mean((y[:, -horizon:, ...] - prediction[:, -horizon:, ...]) ** 2)
 
-    loss =  recon_loss + pred_loss + recon_loss + kl
+    loss = recon_loss + pred_loss + kl
 
     return loss
 
@@ -239,13 +252,13 @@ def train_model(
 
         val_loss = jnp.mean(jnp.stack(val_losses))
 
-
         train_history.append(train_loss)
         val_history.append(val_loss)
 
         print(f"Epoch {epoch+1} | train {train_loss:.4f} | val {val_loss:.4f}")
 
     return model, train_history, val_history
+
 
 @nnx.jit
 def eval_step(model, x, y, horizon=20):
@@ -257,11 +270,9 @@ def eval_step(model, x, y, horizon=20):
         for _ in range(horizon):
             out = model(x_curr)
 
-
             pred = out["prediction"][:, -1:]  # (B, 1, C, D)
 
             preds.append(pred)
-
 
             x_curr = jnp.concatenate([x_curr[:, 1:], pred], axis=1)
 
@@ -275,6 +286,7 @@ def eval_step(model, x, y, horizon=20):
     mse = jnp.mean((preds - y_target) ** 2)
 
     return mse
+
 
 def takens_embedding_multichannel(data, embedding_dim=10, delay=5):
 
@@ -325,6 +337,7 @@ class DataLoader:
             batch_idx = indices[start : start + self.batch_size]
             yield self.X[batch_idx], self.y[batch_idx]
 
+
 def plot_losses(train_history, val_history, save_path="losses.png"):
 
     train_history = np.array(train_history)
@@ -370,8 +383,8 @@ def mian(mode_cls, batch_size):
     # -------------------------
     # EMBEDDING
     # -------------------------
-    embedding_dim = 8
-    delay = 3
+    embedding_dim = 20
+    delay = 1
 
     X_embedded = takens_embedding_multichannel(
         data, embedding_dim=embedding_dim, delay=delay
@@ -387,11 +400,15 @@ def mian(mode_cls, batch_size):
 
     X_embedded_train = X_embedded[:split_norm]
 
-    X_train, y_train = create_dataset(X_embedded_train, window=window_size, horizon=horizon)
+    X_train, y_train = create_dataset(
+        X_embedded_train, window=window_size, horizon=horizon
+    )
 
     X_embedded_test = X_embedded[split_norm:]
 
-    X_test, y_test = create_dataset(X_embedded_test, window=window_size, horizon=horizon)
+    X_test, y_test = create_dataset(
+        X_embedded_test, window=window_size, horizon=horizon
+    )
 
     corr = np.corrcoef(data, rowvar=False)
 
@@ -410,6 +427,20 @@ def mian(mode_cls, batch_size):
     # -------------------------
     # MODEL (NNX)
     # -------------------------
+
+    vae_train_model(
+        x_train=X_train,
+        y_train=y_train,
+        x_test=X_test,
+        y_test=y_test,
+        batch_size=32,
+        in_dim=20,
+        latent_dim=10,
+        num_channels=64,
+        num_epochs=100,
+    )
+
+    return
 
     model = mode_cls(
         in_dim=8,

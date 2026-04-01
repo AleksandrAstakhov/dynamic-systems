@@ -110,7 +110,7 @@ class STFormer(nnx.Module):
         # z = mu_ + logvar_ * rngs
         z = mu.reshape(B, S, C, -1)
 
-        p = self.model_layers(None, z, None).reshape(B * S, C, -1)
+        p = self.model_layers(z).reshape(B * S, C, -1)
 
         mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
             self.mu_proj, p
@@ -168,7 +168,7 @@ class DiffGraphSTFormer(STFormer):
 
         self.model_layers = nnx.Sequential(
             *[
-                LightDiffGraphSTFormerBlock(
+                DiffGraphSTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
@@ -201,14 +201,13 @@ class TFormer(nnx.Module):
 
         self.model_layers = nnx.Sequential(
             *[
-                LightTFormerBlock(
+                TFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
-                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)
@@ -322,7 +321,7 @@ class GConvSTFormer(nnx.Module):
             ]
         )
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels, only="params")
+        backup = nnx.split_rngs(rngs, splits=num_chanels)
 
         self.vae = create_v_model(
             rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
@@ -440,18 +439,6 @@ class VectorVAE(nnx.Module):
         z = z.reshape(B, S, C, -1)
 
         return recon, mu, logvar, z
-
-    @staticmethod
-    def loss_fn(x, recon, mu, logvar, beta: float = 1.0):
-
-        recon_loss = jnp.mean((recon - x) ** 2)
-
-        kl = -0.5 * (1 + logvar - mu**2 - jnp.exp(logvar))
-        kl = jnp.mean(jnp.sum(kl, axis=-1))
-
-        loss = recon_loss + beta * kl
-
-        return loss
 
 
 class diff_sigma(nnx.Module):
