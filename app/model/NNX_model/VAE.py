@@ -3,33 +3,38 @@ import jax
 import jax.numpy as jnp
 import pickle
 
-
 class Encoder(nnx.Module):
     def __init__(self, input_dim, latent_dim, *, rngs: nnx.Rngs):
-        self.dense1 = nnx.Linear(input_dim, latent_dim, rngs=rngs)
-        self.dense2 = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
+
+        self.net = nnx.Sequential(
+            nnx.Linear(input_dim, latent_dim, rngs=rngs),
+            nnx.gelu(),
+            nnx.Linear(latent_dim, latent_dim, rngs=rngs),
+            nnx.gelu(),
+            nnx.Linear(latent_dim, latent_dim, rngs=rngs),
+            nnx.gelu(),
+        )
 
         self.mu_proj = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
         self.logvar_proj = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
 
     def __call__(self, x):
-        x = nnx.gelu(self.dense1(x))
-        x = nnx.gelu(self.dense2(x))
-
+        x = self.net(x)
         mu = self.mu_proj(x)
         logvar = self.logvar_proj(x)
-
         return mu, logvar
 
 
 class Decoder(nnx.Module):
     def __init__(self, latent_dim, out_dim, *, rngs: nnx.Rngs):
-        self.dense1 = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
-        self.out = nnx.Linear(latent_dim, out_dim, rngs=rngs)
+        self.net = nnx.Sequential(
+            # nnx.Linear(latent_dim, latent_dim, rngs=rngs),
+            # nnx.relu(),
+            nnx.Linear(latent_dim, out_dim, rngs=rngs)
+        )
 
     def __call__(self, z):
-        z = nnx.relu(self.dense1(z))
-        return self.out(z)
+        return self.net(z)
 
 
 class VAE(nnx.Module):
