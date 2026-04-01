@@ -3,16 +3,20 @@ import jax
 import jax.numpy as jnp
 import pickle
 
+class GELU(nnx.Module):
+    def __call__(self, x):
+        return 0.5 * x * (1 + jnp.tanh(jnp.sqrt(2 / jnp.pi) * (x + 0.044715 * x**3)))
+
 class Encoder(nnx.Module):
     def __init__(self, input_dim, latent_dim, *, rngs: nnx.Rngs):
 
         self.net = nnx.Sequential(
             nnx.Linear(input_dim, latent_dim, rngs=rngs),
-            nnx.gelu(),
+            GELU(),
             nnx.Linear(latent_dim, latent_dim, rngs=rngs),
-            nnx.gelu(),
+            GELU(),
             nnx.Linear(latent_dim, latent_dim, rngs=rngs),
-            nnx.gelu(),
+            GELU(),
         )
 
         self.mu_proj = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
