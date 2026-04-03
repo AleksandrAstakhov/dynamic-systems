@@ -360,10 +360,10 @@ def main():
         in_dim=in_dim,
         latent_dim=latent_dim,
         num_channels=num_chanels,
-        num_epochs=1,
+        num_epochs=100,
     )
 
-    model = STFormer(
+    st_model = STFormer(
         in_dim=latent_dim,
         latent_dim=latent_dim,
         out_dim=latent_dim,
@@ -378,8 +378,33 @@ def main():
         spatial_model_cls=Transformer,
     )
 
+    t_model = STFormer(
+        in_dim=latent_dim,
+        latent_dim=latent_dim,
+        out_dim=latent_dim,
+        temporal_model_dim=latent_dim,
+        spatial_model_dim=latent_dim,
+        num_blocks=2,
+        temporal_num_heads=4,
+        temporal_head_dim=4,
+        spatial_head_dim=4,
+        spatial_num_heads=4,
+        num_chanels=64,
+        spatial_model_cls=None,
+    )
+
     train_stmodel(
-        model,
+        t_model,
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_test,
+        y_test=y_test,
+        encoder=vae.vae.encoder,
+        num_epochs=40
+    )
+
+    train_stmodel(
+        st_model,
         X_train=X_train,
         y_train=y_train,
         X_test=X_test,

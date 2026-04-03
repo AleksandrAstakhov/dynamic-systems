@@ -2,7 +2,7 @@ import jax
 import jax.numpy as jnp
 import flax.linen as nn
 
-from STFormer import (
+from STFormer_ import (
     STFormer,
     DiffGraphSTFormer,
     TFormer,
@@ -439,6 +439,8 @@ def mian(mode_cls, batch_size):
         num_channels=64,
         num_epochs=200,
     )
+
+    for x, y, 
 
     model = mode_cls(
         in_dim=15,
