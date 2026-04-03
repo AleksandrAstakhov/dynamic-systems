@@ -157,7 +157,6 @@ class STFormer(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs())
         self.dt = dt
-        self.diffusion = nnx.Param(self.rngs.normal(shape=latent_dim))
 
         self.encoder = encoder
 
@@ -232,7 +231,7 @@ class STFormer(nnx.Module):
 
             drift = self.drift_model(z)
 
-        dW = jax.random.normal(self.rngs(), z.shape) * jnp.sqrt(self.dt)
-        dz = drift * self.dt + self.diffusion * dW
+        dW = jax.random.normal(self.rngs(), drift.shape) * jnp.sqrt(self.dt)
+        dz = drift * self.dt + 1.0 * dW
 
         return dz

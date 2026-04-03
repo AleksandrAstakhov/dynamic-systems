@@ -239,7 +239,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
         num_train_batches = 0
 
         for batch in tqdm(train_loader, desc=f"Train Epoch {epoch}"):
-            z, dz = batch  # распаковка батча
+            z, dz = batch
             loss = train_step(model, optimizer, z, dz)
             train_loss += loss
             num_train_batches += 1
@@ -261,7 +261,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
         history["val_loss"].append(float(avg_val_loss))
 
         # ========== ЛОГИРОВАНИЕ ==========
-        print(f"\n📊 Results for epoch {epoch}:")
+        print(f"\n Results for epoch {epoch}:")
         print(f"   Train Loss: {avg_train_loss:.6f}")
         print(f"   Val Loss:   {avg_val_loss:.6f}")
 
@@ -278,143 +278,138 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
     return history
 
 
-def main():
+try:
+    dataset = DS006940(cache_dir="./data")
+    raw = dataset.datasets[0].raw
+    raw.load_data()
+    raw.filter(1, 40)
 
-    try:
-        dataset = DS006940(cache_dir="./data")
-        raw = dataset.datasets[0].raw
-        raw.load_data()
-        raw.filter(1, 40)
+    data = raw.get_data().T[:3000]
 
-        data = raw.get_data().T[:3000]
+except ImportError:
+    print("DS006940 не найден, используем синтетические данные")
 
-    except ImportError:
-        print("DS006940 не найден, используем синтетические данные")
+print("Raw EEG:", data.shape)
 
-    print("Raw EEG:", data.shape)
+# -------------------------
+# NORMALIZATION
+# -------------------------
+split_norm = int(len(data) * 0.8)
 
-    # -------------------------
-    # NORMALIZATION
-    # -------------------------
-    split_norm = int(len(data) * 0.8)
+mean = data[:split_norm].mean(axis=0)
+std = data[:split_norm].std(axis=0) + 1e-8
 
-    mean = data[:split_norm].mean(axis=0)
-    std = data[:split_norm].std(axis=0) + 1e-8
+data = (data - mean) / std
 
-    data = (data - mean) / std
+# -------------------------
+# EMBEDDING
+# -------------------------
+embedding_dim = 30
+delay = 1
 
-    # -------------------------
-    # EMBEDDING
-    # -------------------------
-    embedding_dim = 30
-    delay = 1
+in_dim = embedding_dim
 
-    in_dim = embedding_dim
+X_embedded = takens_embedding_multichannel(
+    data, embedding_dim=embedding_dim, delay=delay
+)
 
-    X_embedded = takens_embedding_multichannel(
-        data, embedding_dim=embedding_dim, delay=delay
-    )
+print("Takens shape:", X_embedded.shape)
 
-    print("Takens shape:", X_embedded.shape)
+# -------------------------
+# DATASET
+# -------------------------
+window_size = 50
+horizon = 1
 
-    # -------------------------
-    # DATASET
-    # -------------------------
-    window_size = 50
-    horizon = 1
+X_embedded_train = X_embedded[:split_norm]
 
-    X_embedded_train = X_embedded[:split_norm]
+X_train, y_train = create_dataset(X_embedded_train, window=window_size, horizon=horizon)
 
-    X_train, y_train = create_dataset(
-        X_embedded_train, window=window_size, horizon=horizon
-    )
+X_embedded_test = X_embedded[split_norm:]
 
-    X_embedded_test = X_embedded[split_norm:]
+X_test, y_test = create_dataset(X_embedded_test, window=window_size, horizon=horizon)
 
-    X_test, y_test = create_dataset(
-        X_embedded_test, window=window_size, horizon=horizon
-    )
+corr = np.corrcoef(data, rowvar=False)
 
-    corr = np.corrcoef(data, rowvar=False)
+threshold = 0.7
 
-    threshold = 0.7
-    adj = np.where(np.abs(corr) >= threshold, 1, 0)
+adj = np.where(np.abs(corr) >= threshold, 1, 0)
+np.fill_diagonal(adj, 0)
 
-    np.fill_diagonal(adj, 0)
+senders, receivers = np.nonzero(adj)
 
-    senders, receivers = np.nonzero(adj)
+edge_index = np.stack([senders, receivers], axis=0)
 
-    edge_index = np.stack([senders, receivers], axis=0)
+print(f"Train: {X_train.shape}, {y_train.shape}")
+print(f"Test: {X_test.shape}, {y_test.shape}")
 
-    print(f"Train: {X_train.shape}, {y_train.shape}")
-    print(f"Test: {X_test.shape}, {y_test.shape}")
+in_dim = embedding_dim
+latent_dim = embedding_dim // 2 + 1
 
-    in_dim = embedding_dim
-    latent_dim = embedding_dim // 2 + 1
-    num_chanels = 64
+num_chanels = 64
 
-    vae = vae_train_model(
-        x_train=X_train,
-        y_train=y_train,
-        x_test=X_test,
-        y_test=y_test,
-        batch_size=32,
-        in_dim=in_dim,
-        latent_dim=latent_dim,
-        num_channels=num_chanels,
-        num_epochs=100,
-    )
+vae = vae_train_model(
+    x_train=X_train,
+    y_train=y_train,
+    x_test=X_test,
+    y_test=y_test,
+    batch_size=32,
+    in_dim=in_dim,
+    latent_dim=latent_dim,
+    num_channels=num_chanels,
+    num_epochs=100,
+)
 
-    st_model = STFormer(
-        in_dim=latent_dim,
-        latent_dim=latent_dim,
-        out_dim=latent_dim,
-        temporal_model_dim=latent_dim,
-        spatial_model_dim=latent_dim,
-        num_blocks=2,
-        temporal_num_heads=4,
-        temporal_head_dim=4,
-        spatial_head_dim=4,
-        spatial_num_heads=4,
-        num_chanels=64,
-        spatial_model_cls=Transformer,
-    )
+st_model = STFormer(
+    in_dim=latent_dim,
+    latent_dim=2 * latent_dim,
+    out_dim=latent_dim,
+    temporal_model_dim=2 * latent_dim,
+    spatial_model_dim=2 * latent_dim,
+    num_blocks=2,
+    temporal_num_heads=6,
+    temporal_head_dim=8,
+    spatial_head_dim=6,
+    spatial_num_heads=8,
+    num_chanels=64,
+    spatial_model_cls=Transformer,
+)
 
-    t_model = STFormer(
-        in_dim=latent_dim,
-        latent_dim=latent_dim,
-        out_dim=latent_dim,
-        temporal_model_dim=latent_dim,
-        spatial_model_dim=latent_dim,
-        num_blocks=2,
-        temporal_num_heads=4,
-        temporal_head_dim=4,
-        spatial_head_dim=4,
-        spatial_num_heads=4,
-        num_chanels=64,
-        spatial_model_cls=None,
-    )
+t_model = STFormer(
+    in_dim=latent_dim,
+    latent_dim=2 * latent_dim,
+    out_dim=latent_dim,
+    temporal_model_dim=2 * latent_dim,
+    spatial_model_dim=2 * latent_dim,
+    num_blocks=2,
+    temporal_num_heads=6,
+    temporal_head_dim=8,
+    spatial_head_dim=6,
+    spatial_num_heads=8,
+    num_chanels=64,
+    spatial_model_cls=None,
+)
 
-    train_stmodel(
-        t_model,
-        X_train=X_train,
-        y_train=y_train,
-        X_test=X_test,
-        y_test=y_test,
-        encoder=vae.vae.encoder,
-        num_epochs=40,
-    )
+train_stmodel(
+    st_model,
+    X_train=X_train,
+    y_train=y_train,
+    X_test=X_test,
+    y_test=y_test,
+    encoder=vae.vae.encoder,
+    num_epochs=40,
+)
 
-    train_stmodel(
-        st_model,
-        X_train=X_train,
-        y_train=y_train,
-        X_test=X_test,
-        y_test=y_test,
-        encoder=vae.vae.encoder,
-        num_epochs=40,
-    )
+train_stmodel(
+    t_model,
+    X_train=X_train,
+    y_train=y_train,
+    X_test=X_test,
+    y_test=y_test,
+    encoder=vae.vae.encoder,
+    num_epochs=40,
+)
 
 
-if __name__ == "__main__":
-    main()
+# if __name__ == "__main__":
+#     main()
