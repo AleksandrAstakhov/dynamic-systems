@@ -114,9 +114,9 @@ class STFormerBlock(nnx.Module):
         B, S, C, _ = z.shape
 
         if self.spatial_model:
-            z = self.spatial_model(z.transpose(0, 2, 1, 3).reshape(B * C, S, -1))
+            z = self.spatial_model(z.reshape(B * S, C, -1))
 
-            z = z.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
+            z = z.reshape(B, S, C, -1)
 
         z = self.ln(z)
 

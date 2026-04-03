@@ -87,7 +87,9 @@ class Grand(nnx.Module):
 
         self.solver = solver_cls()
 
-    def __call__(self, x, t):
+    def __call__(self, x):
+
+        t = jnp.linspace(0, 0.2, 3)
 
         def f(t, y, args):
             return self.diffuser(t, y)

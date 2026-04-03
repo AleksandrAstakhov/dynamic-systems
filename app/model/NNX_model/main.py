@@ -11,6 +11,8 @@ from STFormerBlocks import (
     Transformer,
 )
 
+from graph_modules import Grand
+
 from STFormer_final import STFormer, STFormerBlock
 
 from VAE import VAE
@@ -388,6 +390,22 @@ t_model = STFormer(
     spatial_num_heads=8,
     num_chanels=64,
     spatial_model_cls=None,
+)
+
+diff_st_model = STFormer(
+    in_dim=latent_dim,
+    latent_dim=2 * latent_dim,
+    out_dim=latent_dim,
+    temporal_model_dim=2 * latent_dim,
+    spatial_model_dim=2 * latent_dim,
+    num_blocks=2,
+    temporal_num_heads=6,
+    temporal_head_dim=8,
+    spatial_head_dim=6,
+    spatial_num_heads=8,
+    num_chanels=64,
+    spatial_model_cls=Grand,
+    spatial_model_extra_params={"num_chanels": num_chanels},
 )
 
 train_stmodel(
