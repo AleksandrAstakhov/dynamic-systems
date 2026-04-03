@@ -214,7 +214,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
     @nnx.jit
     def eval_step(model: nnx.Module, z: jnp.ndarray, dz: jnp.ndarray) -> jnp.ndarray:
         dz_cuppa = model(z)
-        loss = jnp.mean((dz[:, -1, ...] - dz_cuppa[:, -1, ...]) ** 2)
+        loss = jnp.mean((dz - dz_cuppa[:, -1, ...]) ** 2)
         return loss
 
     optimizer = nnx.Optimizer(
