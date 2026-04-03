@@ -223,15 +223,12 @@ class STFormer(nnx.Module):
 
         if self.temporal_multichanel:
 
-            drift = nnx.vmap(lambda model, h: model(h), in_axes=(0, 2), out_axes=2)(
+            dz = nnx.vmap(lambda model, h: model(h), in_axes=(0, 2), out_axes=2)(
                 self.drift_model, z
             )
 
         else:
 
-            drift = self.drift_model(z)
-
-        dW = jax.random.normal(self.rngs(), drift.shape) * jnp.sqrt(self.dt)
-        dz = drift * self.dt + 1.0 * dW
+            dz = self.drift_model(z)
 
         return dz

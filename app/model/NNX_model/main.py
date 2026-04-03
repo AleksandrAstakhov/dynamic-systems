@@ -357,7 +357,7 @@ vae = vae_train_model(
     in_dim=in_dim,
     latent_dim=latent_dim,
     num_channels=num_chanels,
-    num_epochs=100,
+    num_epochs=30,
 )
 
 st_model = STFormer(
