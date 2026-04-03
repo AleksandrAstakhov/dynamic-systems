@@ -70,9 +70,11 @@ def vae_train_model(
     def vae_loss_fn(model, x):
         recon, mu, logvar, _ = model(x)
 
-        recon_loss = jnp.mean((x - recon) ** 2)
+        recon_loss = jnp.mean((x[:, -1, ...] - recon[:, -1, ...]) ** 2)
 
-        kl_loss = -0.5 * jnp.mean(1 + logvar - mu**2 - jnp.exp(logvar))
+        kl_loss = -0.5 * jnp.mean(
+            1 + logvar[:, -1, ...] - mu[:, -1, ...] ** 2 - jnp.exp(logvar[:, -1, ...])
+        )
 
         loss = recon_loss + kl_loss
         return loss, (recon_loss, kl_loss)
@@ -152,8 +154,8 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
             mu, logvar = nnx.vmap(
                 lambda model, h: model(h), in_axes=(0, 2), out_axes=(2, 2)
             )(encoder, x)
-            mu_list.append(mu)
-            logvar_list.append(logvar)
+            mu_list.append(mu[:, -1, ...])
+            logvar_list.append(logvar[:, -1, ...])
 
         mu = jnp.concatenate(mu_list, axis=0)
         logvar = jnp.concatenate(logvar_list, axis=0)
@@ -198,7 +200,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
 
         dz_cuppa = model(z)
 
-        return jnp.mean((dz[:, -1, ...] - dz_cuppa[:, -1, ...]) ** 2)
+        return jnp.mean((dz - dz_cuppa[:, -1, ...]) ** 2)
 
     @nnx.jit
     def train_step(
@@ -400,7 +402,7 @@ def main():
         X_test=X_test,
         y_test=y_test,
         encoder=vae.vae.encoder,
-        num_epochs=40
+        num_epochs=40,
     )
 
     train_stmodel(
@@ -410,8 +412,9 @@ def main():
         X_test=X_test,
         y_test=y_test,
         encoder=vae.vae.encoder,
-        num_epochs=40
+        num_epochs=40,
     )
+
 
 if __name__ == "__main__":
     main()

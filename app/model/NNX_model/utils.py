@@ -12,69 +12,110 @@ def create_v_model(rngs: nnx.Rngs, model_cls, model_args):
 
 
 class FlowDataloader:
-
-    def __init__(self, mu_x, logvar_x, mu_y, logvar_y, batch_size, dt, rngs, shuffle=True):
-
+    def __init__(
+        self,
+        mu_x,
+        logvar_x,
+        mu_y,
+        logvar_y,
+        batch_size,
+        dt,
+        rngs,
+        window_size=50,
+        shuffle=True,
+    ):
         self.mu_x = mu_x
         self.mu_y = mu_y
         self.rngs = nnx.Rngs(rngs())
-        self.num_samples = mu_x.shape[0]
         self.batch_size = batch_size
         self.dt = dt
-        self.sigma_x = jax.nn.softplus(logvar_x) + 1e-4
-        self.sigma_y = jax.nn.softplus(logvar_y) + 1e-4
+        self.window_size = window_size
         self.shuffle = shuffle
 
+        self.sigma_x = jax.nn.softplus(logvar_x) + 1e-4
+        self.sigma_y = jax.nn.softplus(logvar_y) + 1e-4
+
+        self.valid_indices = np.arange(window_size - 1, mu_x.shape[0])
+
     def __iter__(self):
-        indices = np.arange(self.num_samples)
+        indices = self.valid_indices.copy()
         if self.shuffle:
             np.random.shuffle(indices)
 
-        for start in range(0, self.num_samples, self.batch_size):
+        for start in range(0, len(indices), self.batch_size):
             batch_idx = indices[start : start + self.batch_size]
-            mu_x = self.mu_x[batch_idx]
-            mu_y = self.mu_y[batch_idx]
-            sigma_x = self.sigma_x[batch_idx]
-            sigma_y = self.sigma_y[batch_idx]
 
-            x = mu_x + sigma_x * self.rngs.normal(mu_x.shape)
+            x_batch = []
+            dz_batch = []
 
-            dz = (mu_y - mu_x) / self.dt + (
-                (((sigma_y - sigma_x) / self.dt) ** 2 - jnp.ones(mu_x.shape))
-                / (2 * sigma_x**2)
-            ) * (x - mu_x)
+            for idx in batch_idx:
+                mu_x_w = self.mu_x[idx - self.window_size + 1 : idx + 1]
+                mu_y_w = self.mu_y[idx - self.window_size + 1 : idx + 1]
+                sigma_x_w = self.sigma_x[idx - self.window_size + 1 : idx + 1]
+                sigma_y_w = self.sigma_y[idx - self.window_size + 1 : idx + 1]
 
-            yield x, dz
+                mu_x_t = mu_x_w[-1]
+                mu_y_t = mu_y_w[-1]
+                sigma_x_t = sigma_x_w[-1]
+                sigma_y_t = sigma_y_w[-1]
+
+                x = mu_x_t + sigma_x_t * self.rngs.normal(mu_x_t.shape)
+
+                dz = (mu_y_t - mu_x_t) / self.dt + (
+                    (((sigma_y_t - sigma_x_t) / self.dt) ** 2 - 1.0)
+                    / (2 * sigma_x_t**2)
+                ) * (x - mu_x_t)
+
+                x_batch.append(jnp.concatenate([mu_x_w], axis=0))
+                dz_batch.append(dz)
+
+            yield jnp.array(x_batch), jnp.array(dz_batch)
 
 
 class DataLoader:
-    def __init__(self, X, y=None, batch_size=32, shuffle=True, encoder=None):
+    def __init__(
+        self, X, y=None, batch_size=32, shuffle=True, encoder=None, window_size=50
+    ):
         self.X = X
         self.y = y
         self.batch_size = batch_size
         self.shuffle = shuffle
-        self.num_samples = X.shape[0]
         self.encoder = encoder
+        self.window_size = window_size
+
+        self.valid_indices = np.arange(window_size - 1, X.shape[0])
 
     def __iter__(self):
-        indices = np.arange(self.num_samples)
+        indices = self.valid_indices.copy()
+
         if self.shuffle:
             np.random.shuffle(indices)
 
-        for start in range(0, self.num_samples, self.batch_size):
+        for start in range(0, len(indices), self.batch_size):
             batch_idx = indices[start : start + self.batch_size]
-            X_batch = self.X[batch_idx]
+
+            X_batch = []
+            y_batch = [] if self.y is not None else None
+
+            for idx in batch_idx:
+                window = self.X[idx - self.window_size + 1 : idx + 1]
+                X_batch.append(window)
+
+                if self.y is not None:
+                    y_batch.append(self.y[idx])
+
+            X_batch = jnp.array(X_batch)
 
             if self.encoder:
                 X_batch = self.encoder(X_batch)
 
             if self.y is not None:
-                y_batch = self.y[batch_idx]
+                y_batch = jnp.array(y_batch)
                 if self.encoder:
                     y_batch = self.encoder(y_batch)
-                yield jnp.array(X_batch), jnp.array(y_batch)
+                yield X_batch, y_batch
             else:
-                yield jnp.array(X_batch)
+                yield X_batch
 
 
 def create_dataset(embedded, window=20, horizon=1):
@@ -82,11 +123,8 @@ def create_dataset(embedded, window=20, horizon=1):
 
     n_samples = T - window - horizon + 1
 
-    x = jnp.stack([embedded[i : i + window] for i in range(n_samples)])
-
-    y = jnp.stack(
-        [embedded[i + horizon : i + horizon + window] for i in range(n_samples)]
-    )
+    x = jnp.array(embedded[: len(embedded) - horizon])
+    y = jnp.stack(embedded[horizon:])
 
     return x, y
 
