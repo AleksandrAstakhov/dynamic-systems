@@ -10,6 +10,7 @@ from STFormerBlocks import (
     LightTFormerBlock,
     LightDiffGraphSTFormerBlock,
     MLP,
+    Transformer,
 )
 from VAE import VAE
 import matplotlib.pyplot as plt
@@ -51,13 +52,14 @@ class STFormer(nnx.Module):
 
         self.model_layers = nnx.Sequential(
             *[
-                STFormerBlock(
+                LightSTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
+                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)
@@ -168,13 +170,14 @@ class DiffGraphSTFormer(STFormer):
 
         self.model_layers = nnx.Sequential(
             *[
-                DiffGraphSTFormerBlock(
+                LightDiffGraphSTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
+                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)
@@ -201,13 +204,14 @@ class TFormer(nnx.Module):
 
         self.model_layers = nnx.Sequential(
             *[
-                TFormerBlock(
+                LightTFormerBlock(
                     in_dim=vae_latent if i == 0 else model_dim,
                     out_dim=model_dim,
                     model_dim=model_dim,
                     num_heads=num_heads,
                     head_dim=head_dim,
                     num_chanels=num_chanels,
+                    edge_index=edge_index,
                     rngs=rngs,
                 )
                 for i in range(num_layers)
@@ -242,25 +246,21 @@ class TFormer(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs.params())
 
-    def __call__(self, x):
+    def __call__(self, x, mu, sigma):
+
+        x = jnp.concat([x, mu, sigma], axis=-1)
 
         B, S, C, D = x.shape
 
-        x_ = x.reshape(B * S, C, D)
-
-        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1)(
-            self.vae, x_
-        )
-
-        recon = recon.reshape(B, S, C, D)
+        # x = x.reshape(B * S, C, D)
 
         # mu_ = mu.reshape(B, S, C, -1)
         # logvar_ = logvar.reshape(B, S, C, -1)
 
         # z = mu_ + logvar_ * rngs
-        z = mu.reshape(B, S, C, -1)
+        # z = mu.reshape(B, S, C, -1)
 
-        p = self.model_layers(z).reshape(B * S, C, -1)
+        p = self.model_layers(x).reshape(B * S, C, -1)
 
         mu_pred = nnx.vmap(lambda proj, h: proj(h), in_axes=(0, 1), out_axes=1)(
             self.mu_proj, p
@@ -280,9 +280,7 @@ class TFormer(nnx.Module):
 
         return {
             "prediction": out,
-            "reconstruction": recon,
             "mu": mu,
-            "logvar": logvar,
             "mu_pred": mu_pred,
             "sigma": sigma,
         }
@@ -418,12 +416,8 @@ class VectorVAE(nnx.Module):
 
     def __call__(self, x: jnp.ndarray):
 
-        B, S, C, D = x.shape
-
-        x_ = x.reshape(B * S, C, D)
-
-        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 1), out_axes=1)(
-            self.vae, x_
+        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 2), out_axes=(2, 2, 2))(
+            self.vae, x
         )
 
         std = jnp.exp(0.5 * logvar)
@@ -432,11 +426,6 @@ class VectorVAE(nnx.Module):
         eps = jax.random.normal(rng, std.shape)
 
         z = mu + eps * std
-
-        recon = recon.reshape(B, S, C, D)
-        mu = mu.reshape(B, S, C, -1)
-        logvar = logvar.reshape(B, S, C, -1)
-        z = z.reshape(B, S, C, -1)
 
         return recon, mu, logvar, z
 

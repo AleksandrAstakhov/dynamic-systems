@@ -293,7 +293,6 @@ class LightSTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-
         self.temporal_transformer = Transformer(
             in_dim=in_dim,
             out_dim=model_dim,
@@ -306,7 +305,7 @@ class LightSTFormerBlock(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs())
 
-    def __call__(self, t, x, arg):
+    def __call__(self, x):
         B, S, C, D = x.shape
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, -1)
@@ -356,7 +355,6 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
 
-
         self.temporal_transformer = Transformer(
             in_dim=in_dim,
             out_dim=model_dim,
@@ -367,10 +365,9 @@ class LightDiffGraphSTFormerBlock(nnx.Module):
             rngs=rngs,
         )
 
-
         self.rngs = nnx.Rngs(rngs())
 
-    def __call__(self, t, x, arg) -> jax.Array:
+    def __call__(self, x) -> jax.Array:
         B, S, C, D = x.shape
 
         x = x.transpose(0, 2, 1, 3).reshape(B * C, S, D)
@@ -416,7 +413,6 @@ class LightTFormerBlock(nnx.Module):
         self.ln = nnx.LayerNorm(model_dim, rngs=rngs)
 
         self.mlp = MLP(model_dim, model_dim, out_dim, rngs=rngs)
-
 
         self.temporal_transformer = Transformer(
             in_dim=in_dim,

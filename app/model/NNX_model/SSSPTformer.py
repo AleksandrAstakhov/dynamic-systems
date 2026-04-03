@@ -383,7 +383,7 @@ def mian(mode_cls, batch_size):
     # -------------------------
     # EMBEDDING
     # -------------------------
-    embedding_dim = 20
+    embedding_dim = 30
     delay = 1
 
     X_embedded = takens_embedding_multichannel(
@@ -428,28 +428,26 @@ def mian(mode_cls, batch_size):
     # MODEL (NNX)
     # -------------------------
 
-    vae_train_model(
+    vae = vae_train_model(
         x_train=X_train,
         y_train=y_train,
         x_test=X_test,
         y_test=y_test,
-        batch_size=32,
-        in_dim=20,
-        latent_dim=10,
+        batch_size=10,
+        in_dim=30,
+        latent_dim=15,
         num_channels=64,
-        num_epochs=100,
+        num_epochs=200,
     )
 
-    return
-
     model = mode_cls(
-        in_dim=8,
-        out_dim=8,
-        model_dim=10,
-        num_heads=4,
-        head_dim=8,
-        vae_latent=4,
-        num_layers=1,
+        in_dim=15,
+        out_dim=15,
+        model_dim=15,
+        num_heads=8,
+        head_dim=4,
+        vae_latent=15,
+        num_layers=2,
         num_chanels=64,
         edge_index=edge_index,
         rngs=nnx.Rngs(0),

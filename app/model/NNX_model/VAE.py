@@ -2,25 +2,33 @@ from flax import nnx
 import jax
 import jax.numpy as jnp
 import pickle
+from STFormerBlocks import Transformer, MLP
+
 
 class GELU(nnx.Module):
     def __call__(self, x):
         return 0.5 * x * (1 + jnp.tanh(jnp.sqrt(2 / jnp.pi) * (x + 0.044715 * x**3)))
 
+
 class Encoder(nnx.Module):
     def __init__(self, input_dim, latent_dim, *, rngs: nnx.Rngs):
 
         self.net = nnx.Sequential(
-            nnx.Linear(input_dim, latent_dim, rngs=rngs),
-            GELU(),
-            nnx.Linear(latent_dim, latent_dim, rngs=rngs),
-            GELU(),
-            nnx.Linear(latent_dim, latent_dim, rngs=rngs),
-            GELU(),
+            Transformer(
+                in_dim=input_dim,
+                model_dim=input_dim,
+                out_dim=input_dim,
+                num_heads=4,
+                head_dim=8,
+                need_pos_enc=True,
+                rngs=rngs,
+            )
         )
 
-        self.mu_proj = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
-        self.logvar_proj = nnx.Linear(latent_dim, latent_dim, rngs=rngs)
+        self.mu_proj = MLP(din=input_dim, dmid=input_dim, dout=latent_dim, rngs=rngs)
+        self.logvar_proj = MLP(
+            din=input_dim, dmid=input_dim, dout=latent_dim, rngs=rngs
+        )
 
     def __call__(self, x):
         x = self.net(x)
