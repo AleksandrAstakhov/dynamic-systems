@@ -87,7 +87,9 @@ class Grand(nnx.Module):
 
         self.solver = solver_cls()
 
-    def __call__(self, x):
+    def __call__(self, x : jnp.ndarray):
+
+        x = x.reshape(32, 50, 64, -1)
 
         t = jnp.linspace(0, 0.2, 3)
 
@@ -109,4 +111,4 @@ class Grand(nnx.Module):
             adjoint=diffrax.DirectAdjoint()
         )
 
-        return sol.ys[-1]
+        return sol.ys[-1].reshape(32 * 50, 64, -1)
