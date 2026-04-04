@@ -101,12 +101,12 @@ class STFormerBlock(nnx.Module):
             )
         self.temporal_multichanel = temporal_multichanel
 
-    def __call__(self, x: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, z: jnp.ndarray) -> jnp.ndarray:
 
-        B, S, C, _ = x.shape
+        B, S, C, _ = z.shape
 
         if self.spatial_model:
-            z = self.spatial_model(x.reshape(B * S, C, -1))
+            z = self.spatial_model(z.reshape(B * S, C, -1))
 
             z = z.reshape(B, S, C, -1)
 
@@ -116,7 +116,7 @@ class STFormerBlock(nnx.Module):
                 z,
             )
         else:
-            z = self.temporal_model(x)
+            z = self.temporal_model(z)
 
         z = self.ln(z)
 
