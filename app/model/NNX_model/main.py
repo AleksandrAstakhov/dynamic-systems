@@ -10,6 +10,7 @@ from STFormerBlocks import (
     LightTFormerBlock,
     Transformer,
 )
+import json
 
 from graph_modules import Grand
 
@@ -145,7 +146,7 @@ def vae_train_model(
     return model
 
 
-def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
+def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, batch_size):
 
     def collect_latents(encoder, dataloader):
         mu_list = []
@@ -156,6 +157,10 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
             mu, logvar = nnx.vmap(
                 lambda model, h: model(h), in_axes=(0, 2), out_axes=(2, 2)
             )(encoder, x)
+
+            mu = jax.lax.stop_gradient(mu)
+            logvar = jax.lax.stop_gradient(logvar)
+
             mu_list.append(mu[:, -1, ...])
             logvar_list.append(logvar[:, -1, ...])
 
@@ -182,7 +187,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
         logvar_x_train,
         mu_y_train,
         logvar_y_train,
-        batch_size=32,
+        batch_size=batch_size,
         dt=1 / 250,
         rngs=nnx.Rngs(21231),
     )
@@ -192,7 +197,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs):
         logvar_x_test,
         mu_y_test,
         logvar_y_test,
-        batch_size=32,
+        batch_size=batch_size,
         dt=1 / 250,
         rngs=nnx.Rngs(21231),
         shuffle=False,
@@ -359,7 +364,7 @@ vae = vae_train_model(
     in_dim=in_dim,
     latent_dim=latent_dim,
     num_channels=num_chanels,
-    num_epochs=30,
+    num_epochs=1,
 )
 
 st_model = STFormer(
@@ -408,7 +413,7 @@ diff_st_model = STFormer(
     spatial_model_extra_params={"num_chanels": num_chanels},
 )
 
-train_stmodel(
+history = train_stmodel(
     st_model,
     X_train=X_train,
     y_train=y_train,
@@ -416,9 +421,13 @@ train_stmodel(
     y_test=y_test,
     encoder=vae.vae.encoder,
     num_epochs=40,
+    batch_size=32,
 )
 
-train_stmodel(
+with open('history_st.json', 'w') as f:
+    json.dump(history, f)
+
+history = train_stmodel(
     t_model,
     X_train=X_train,
     y_train=y_train,
@@ -426,6 +435,21 @@ train_stmodel(
     y_test=y_test,
     encoder=vae.vae.encoder,
     num_epochs=40,
+    batch_size=32,
+)
+
+with open('history_t.json', 'w') as f:
+    json.dump(history, f)
+
+history = train_stmodel(
+    diff_st_model,
+    X_train=X_train,
+    y_train=y_train,
+    X_test=X_test,
+    y_test=y_test,
+    encoder=vae.vae.encoder,
+    num_epochs=40,
+    batch_size=32,
 )
 
 
