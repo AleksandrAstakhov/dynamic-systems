@@ -64,7 +64,7 @@ class FlowDataloader:
                 x = mu_x_t + sigma_x_t * self.rngs.normal(mu_x_t.shape)
 
                 dz = (mu_y_t - mu_x_t) / self.dt + (
-                    (((sigma_y_t - sigma_x_t) / self.dt) ** 2 - g**2)
+                    (((sigma_y_t - sigma_x_t) / self.dt) ** 2 - self.g**2)
                     / (2 * sigma_x_t**2)
                 ) * (x - mu_x_t)
 
