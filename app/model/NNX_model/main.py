@@ -146,7 +146,9 @@ def vae_train_model(
     return model
 
 
-def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, batch_size):
+def train_stmodel(
+    model, X_train, y_train, X_test, y_test, encoder, num_epochs, batch_size
+):
 
     def collect_latents(encoder, dataloader):
         mu_list = []
@@ -154,9 +156,14 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, 
 
         for x in dataloader:
 
-            mu, logvar = nnx.vmap(
-                lambda model, h: model(h), in_axes=(0, 2), out_axes=(2, 2)
-            )(encoder, x)
+            # mu, logvar = nnx.vmap(
+            #     lambda model, h: model(h), in_axes=(0, 2), out_axes=(2, 2)
+            # )(encoder, x)
+            B, S, C, _ = x.shape
+            mu, logvar = encoder(x.transpose(0, 2, 1, 3).reshape(B * C, S, -1))
+
+            mu = mu.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
+            logvar = logvar.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
 
             mu = jax.lax.stop_gradient(mu)
             logvar = jax.lax.stop_gradient(logvar)
@@ -182,6 +189,9 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, 
         encoder=encoder, dataloader=DataLoader(y_test, shuffle=False)
     )
 
+    sigma_dot = jax.nn.softplus(logvar_y_train) - jax.nn.softplus(logvar_x_train)
+    g = sigma_dot.mean()
+
     train_loader = FlowDataloader(
         mu_x_train,
         logvar_x_train,
@@ -189,6 +199,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, 
         logvar_y_train,
         batch_size=batch_size,
         dt=1 / 250,
+        g=g,
         rngs=nnx.Rngs(21231),
     )
 
@@ -200,6 +211,7 @@ def train_stmodel(model, X_train, y_train, X_test, y_test, encoder, num_epochs, 
         batch_size=batch_size,
         dt=1 / 250,
         rngs=nnx.Rngs(21231),
+        g=g,
         shuffle=False,
     )
 
@@ -424,7 +436,7 @@ history = train_stmodel(
     batch_size=32,
 )
 
-with open('history_st.json', 'w') as f:
+with open("history_st.json", "w") as f:
     json.dump(history, f)
 
 history = train_stmodel(
@@ -438,7 +450,7 @@ history = train_stmodel(
     batch_size=32,
 )
 
-with open('history_t.json', 'w') as f:
+with open("history_t.json", "w") as f:
     json.dump(history, f)
 
 history = train_stmodel(

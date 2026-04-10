@@ -21,6 +21,7 @@ class FlowDataloader:
         batch_size,
         dt,
         rngs,
+        g,
         window_size=50,
         shuffle=True,
     ):
@@ -31,6 +32,7 @@ class FlowDataloader:
         self.dt = dt
         self.window_size = window_size
         self.shuffle = shuffle
+        self.g = g
 
         self.sigma_x = jax.nn.softplus(logvar_x) + 1e-4
         self.sigma_y = jax.nn.softplus(logvar_y) + 1e-4
@@ -62,7 +64,7 @@ class FlowDataloader:
                 x = mu_x_t + sigma_x_t * self.rngs.normal(mu_x_t.shape)
 
                 dz = (mu_y_t - mu_x_t) / self.dt + (
-                    (((sigma_y_t - sigma_x_t) / self.dt) ** 2 - 1.0)
+                    (((sigma_y_t - sigma_x_t) / self.dt) ** 2 - g**2)
                     / (2 * sigma_x_t**2)
                 ) * (x - mu_x_t)
 
