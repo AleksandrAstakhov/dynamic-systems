@@ -422,9 +422,15 @@ class VectorVAE(nnx.Module):
         #     self.vae, x
         # )
 
-        recon, mu, logvar = nnx.vmap(
-            lambda x: self.vae(x), in_axes=(2), out_axes=(2, 2, 2)
-        )(x)
+        B, S, C, _ = x.shape
+
+        x = x.transpose(0, 2, 1, 3).reshape(B * C, S, -1)
+
+        recon, mu, logvar = self.vae(x)
+
+        recon = recon.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
+        mu = mu.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
+        logvar = logvar.reshape(B, C, S, -1).transpose(0, 2, 1, 3)
 
         std = jnp.exp(0.5 * logvar)
 
