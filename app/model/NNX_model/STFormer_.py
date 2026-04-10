@@ -406,19 +406,25 @@ class VectorVAE(nnx.Module):
 
         self.rngs = nnx.Rngs(rngs())
 
-        backup = nnx.split_rngs(rngs, splits=num_chanels)
+        # backup = nnx.split_rngs(rngs, splits=num_chanels)
 
-        self.vae = create_v_model(
-            rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
-        )
+        # self.vae = create_v_model(
+        #     rngs, VAE, model_args={"latent_dim": vae_latent, "input_dim": in_dim}
+        # )
 
-        nnx.restore_rngs(backup)
+        # nnx.restore_rngs(backup)
+
+        self.vae = VAE(latent_dim=vae_latent, input_dim=in_dim, rngs=rngs)
 
     def __call__(self, x: jnp.ndarray):
 
-        recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 2), out_axes=(2, 2, 2))(
-            self.vae, x
-        )
+        # recon, mu, logvar = nnx.vmap(lambda vae, x: vae(x), in_axes=(0, 2), out_axes=(2, 2, 2))(
+        #     self.vae, x
+        # )
+
+        recon, mu, logvar = nnx.vmap(
+            lambda x: self.vae(x), in_axes=(2), out_axes=(2, 2, 2)
+        )(x)
 
         std = jnp.exp(0.5 * logvar)
 

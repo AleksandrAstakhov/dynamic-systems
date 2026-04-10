@@ -48,7 +48,7 @@ class STFormerBlock(nnx.Module):
         else:
             self.temporal_model = Transformer(
                 model_args={
-                    "in_dim": temporal_model_dim,
+                    "in_dim": in_dim,
                     "out_dim": temporal_model_dim,
                     "model_dim": temporal_model_dim,
                     "num_heads": temporal_num_heads,
@@ -62,7 +62,7 @@ class STFormerBlock(nnx.Module):
             self.spatial_model = spatial_model_cls(
                 rngs=self.rngs,
                 **{
-                    "in_dim": in_dim,
+                    "in_dim": temporal_model_dim,
                     "out_dim": temporal_model_dim,
                     "model_dim": spatial_model_dim,
                     "num_heads": spatial_num_heads,
@@ -105,11 +105,6 @@ class STFormerBlock(nnx.Module):
 
         B, S, C, _ = z.shape
 
-        if self.spatial_model:
-            z = self.spatial_model(z.reshape(B * S, C, -1))
-
-            z = z.reshape(B, S, C, -1)
-
         if self.temporal_multichanel:
             z = nnx.vmap(lambda model, h: model(h), in_axes=(0, 2), out_axes=2)(
                 self.temporal_model,
@@ -117,6 +112,14 @@ class STFormerBlock(nnx.Module):
             )
         else:
             z = self.temporal_model(z)
+
+        if self.spatial_model:
+            if isinstance(self.spatial_model, Transformer):
+                z = self.spatial_model(z.reshape(B * S, C, -1))
+
+                z = z.reshape(B, S, C, -1)
+            else:
+                z = self.spatial_model(z)
 
         z = self.ln(z)
 
