@@ -1,4 +1,4 @@
-# Вimensionality reduction in control problems
+# Dimensionality reduction in control problems
 
 Расширение проекта `spatial_dyn_torch` со следующими отличиями:
 
