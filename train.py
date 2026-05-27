@@ -234,6 +234,14 @@ def main():
                 "val_fc": va["fc"],
                 "train_inw": tr["inw"],
                 "val_inw": va["inw"],
+                "train_rec": tr["rec"],
+                "val_rec": va["rec"],
+                "train_kl": tr["kl"],
+                "val_kl": va["kl"],
+                "train_aux": tr["aux"],
+                "val_aux": va["aux"],
+                "train_L": tr["L"],
+                "val_L": va["L"],
             }
         )
         print(
