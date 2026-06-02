@@ -8,13 +8,6 @@ import torch.nn.functional as F
 
 
 class PhaseConditionalSpatial(nn.Module):
-    """A_t = sum_k w_k(global(z)) * Q_k(z) K_k(z)^T / sqrt(d).
-
-    Q, K projections are *per-mode*; routing weights are *per-sample*,
-    not per-(i,j)-pair. The result is that all sensors share the same
-    routing decision at a given time step (one global phase per sample).
-    """
-
     def __init__(
         self,
         latent_dim: int,
@@ -48,33 +41,26 @@ class PhaseConditionalSpatial(nn.Module):
             self.routing[-1].bias.zero_()
 
     def phase_weights(self, z: torch.Tensor) -> torch.Tensor:
-        """z: [B, C, L] -> w: [B, n_modes]"""
         z_global = z.mean(dim=1)
         logits = self.routing(z_global)
         return F.softmax(logits, dim=-1)
 
     def per_mode_attn(self, z: torch.Tensor) -> torch.Tensor:
-        """z: [B, C, L] -> [B, n_modes, C, C]"""
-
         Q = torch.einsum("bcl,kld->bkcd", z, self.W_q)
         K = torch.einsum("bcl,kld->bkcd", z, self.W_k)
         return torch.einsum("bkid,bkjd->bkij", Q, K) / math.sqrt(self.d_head)
 
     def attn(self, z: torch.Tensor) -> torch.Tensor:
-        """z: [B, C, L] -> A: [B, C, C]"""
         per = self.per_mode_attn(z)
         w = self.phase_weights(z)
         return torch.einsum("bk,bkij->bij", w, per)
 
     def aux_loss(self, z: torch.Tensor) -> torch.Tensor:
-        """Load-balancing: encourage uniform batch-marginal phase distribution.
-        Returns >= 0, equals 0 when uniform."""
         w = self.phase_weights(z)
         p_bar = w.mean(dim=0)
         H = -(p_bar * (p_bar + 1e-8).log()).sum()
         return math.log(self.n_modes) - H
 
     def forward(self, z: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-        """One-step coupling: h_next = A(z) @ h."""
         A = self.attn(z)
         return torch.einsum("bij,bj->bi", A, h)

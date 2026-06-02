@@ -17,12 +17,6 @@ from train import WindowDataset
 def run_epoch(
     model, loader, opt, device, lam_rec, lam_kl, lam_aux, lam_in, train: bool
 ):
-    """Аналог train.run_epoch, но для DataParallel-обёрнутой модели.
-
-    DataParallel-форвард возвращает словарь, у которого все тензоры
-    собраны по batch-оси с обоих GPU. Внутренние вспомогательные методы
-    (vae.losses, spatial.aux_loss) вызываются через `.module`.
-    """
     model.train(train)
     ctx = torch.enable_grad() if train else torch.no_grad()
     inner = model.module if isinstance(model, nn.DataParallel) else model

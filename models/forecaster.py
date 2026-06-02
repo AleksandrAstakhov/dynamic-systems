@@ -55,22 +55,18 @@ class SpatialForecaster(nn.Module):
         self.alpha = nn.Parameter(torch.tensor(0.5))
 
     def attn_seq(self, z: torch.Tensor) -> torch.Tensor:
-        """Apply spatial attention to every latent timestep.
-        z: [B, T', C, L] -> A_seq: [B, T', C, C]"""
         B, Tp, C, L = z.shape
         z_flat = z.reshape(B * Tp, C, L)
         A_flat = self.spatial.attn(z_flat)
         return A_flat.view(B, Tp, C, C)
 
     def step(self, A: torch.Tensor, h: torch.Tensor) -> torch.Tensor:
-        """One coupling step: h <- (1-α) h + α A h."""
         a = torch.sigmoid(self.alpha)
         return (1 - a) * h + a * torch.einsum("...ij,...j->...i", A, h)
 
     def rollout_with_A(
         self, A_last: torch.Tensor, h_last: torch.Tensor
     ) -> torch.Tensor:
-        """Roll `horizon` steps using the *same* A (per-sample, last timestep)."""
         preds = []
         h = h_last
         for _ in range(self.horizon):
@@ -79,10 +75,6 @@ class SpatialForecaster(nn.Module):
         return torch.stack(preds, dim=1)
 
     def forward(self, x: torch.Tensor, x_raw: torch.Tensor) -> dict:
-        """
-        x     : [B, W, C, m]    Takens windows
-        x_raw : [B, W, C]       raw scalar values aligned with the Takens window
-        """
         vae_out = self.vae(x)
         z = vae_out["z"]
         B, Tp, C, _ = z.shape

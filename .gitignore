@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual environments
+venv/
+env/
+.env/
+.venv/
+
+# Data (генерируется через data_gen.py / MNE)
+data/
+
+# Результаты экспериментов (генерируются запуском run_all.sh)
+results/
+
+# Чекпоинты моделей
+*.pt
+*.pth
+*.ckpt
+
+# Логи и метрики (генерируются скриптами)
+*.log
+*.json
+
+# Графики (генерируются plot_training.py / visualize_matrices.py)
+*.png
+*.pdf
+*.svg
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# macOS
+.DS_Store
+.AppleDouble
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Временные файлы
+/tmp/

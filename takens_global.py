@@ -49,7 +49,6 @@ def embed_field(x: np.ndarray, tau: int, m: int) -> np.ndarray:
 def fnn_fraction_sensor(
     x_c: np.ndarray, tau: int, m: int, Rtol: float = 15.0, Atol: float = 2.0
 ) -> float:
-    """FNN on one sensor's delay embedding (standard per-channel FNN)."""
     e_m = embed_one(x_c, tau, m)
     e_m1 = embed_one(x_c, tau, m + 1)
     n = min(len(e_m), len(e_m1))
@@ -67,9 +66,6 @@ def fnn_fraction_sensor(
 def fnn_fraction_global(
     x: np.ndarray, tau: int, m: int, Rtol: float = 15.0, Atol: float = 2.0
 ) -> float:
-    """Average per-sensor FNN over all sensors. Robust replacement for the
-    joint-state FNN, which suffers from curse of dimensionality in
-    distributed systems with many sensors."""
     fracs = [
         fnn_fraction_sensor(x[:, c], tau, m, Rtol, Atol) for c in range(x.shape[1])
     ]

@@ -10,10 +10,7 @@ import torch.nn.functional as F
 def _spectral_normalize(
     A: torch.Tensor, max_radius: float = 1.0, n_iter: int = 1
 ) -> torch.Tensor:
-    """Soft spectral-norm guard. Divides A by max(1, sigma_max_est / max_radius).
-    Estimate is a single power-iteration on A^T A (per-batch).
-    Differentiable; gradients flow through.
-    """
+
     B, C, _ = A.shape
     v = torch.randn(B, C, 1, device=A.device, dtype=A.dtype)
     v = v / (v.norm(dim=1, keepdim=True) + 1e-8)
@@ -68,7 +65,6 @@ class CorrelationLatentSpatial(nn.Module):
 
 
 class _BankedAttention(nn.Module):
-    """A(z) = sum_k w_k(z) Q_k(z) K_k(z)^T / sqrt(d_head), untied Q,K."""
 
     def __init__(
         self,
@@ -101,10 +97,17 @@ class _BankedAttention(nn.Module):
         with torch.no_grad():
             self.routing[-1].weight.zero_()
             self.routing[-1].bias.zero_()
+        self.temperature = 1.0
 
     def phase_weights(self, z: torch.Tensor) -> torch.Tensor:
         z_global = z.mean(dim=1)
-        return F.softmax(self.routing(z_global), dim=-1)
+        logits = self.routing(z_global)
+        if self.training:
+           
+            return F.gumbel_softmax(logits, tau=self.temperature, hard=True)
+        else:
+            idx = logits.argmax(dim=-1)
+            return F.one_hot(idx, num_classes=self.n_modes).float()
 
     def attn(self, z: torch.Tensor) -> torch.Tensor:
         Q = torch.einsum("bcl,kld->bkcd", z, self.W_q)
@@ -124,7 +127,6 @@ class _BankedAttention(nn.Module):
 
 
 class GRANDDiffLatentSpatial(nn.Module):
-    """propagate(z) = A(z) V(z), A banked, no reaction."""
 
     def __init__(
         self,
@@ -169,7 +171,6 @@ class GRANDDiffLatentSpatial(nn.Module):
 
 
 class GRANDFullLatentSpatial(GRANDDiffLatentSpatial):
-    """propagate(z) = A(z) V(z) + f_theta(z), reaction is per-sensor MLP."""
 
     def __init__(
         self,

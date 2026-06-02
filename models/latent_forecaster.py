@@ -18,8 +18,8 @@ class TemporalPerSensor(nn.Module):
     ):
         super().__init__()
         d_model = latent_dim
-        if d_model % n_heads != 0:
-            n_heads = max(1, d_model // 4)
+        while n_heads > 1 and d_model % n_heads != 0:
+            n_heads -= 1
         self.blocks = nn.ModuleList(
             [
                 VAEBlock(d_model, n_heads=n_heads, ff_mult=ff_mult)
@@ -82,9 +82,12 @@ class LatentForecaster(nn.Module):
         spatial_kind: str,
         vae_dim: int = 32,
         vae_blocks: int = 2,
+        vae_spatial_blocks: int = 1,
         temporal_blocks: int = 1,
         spatial_kwargs: dict | None = None,
         corr_matrix: torch.Tensor | None = None,
+        deterministic_encoder: bool = False,
+        use_phase_loss: bool = False,
     ):
         super().__init__()
         self.warmup = warmup
@@ -99,8 +102,13 @@ class LatentForecaster(nn.Module):
             warmup=warmup,
             d_model=vae_dim,
             n_blocks=vae_blocks,
+            n_spatial_blocks=vae_spatial_blocks,
+            deterministic=deterministic_encoder,
         )
         self.temporal = TemporalPerSensor(latent_dim, n_blocks=temporal_blocks)
+        self.use_phase_loss = use_phase_loss
+        if use_phase_loss:
+            self.phase_head = nn.Linear(latent_dim, 1)
         self.spatial = _make_spatial(
             spatial_kind,
             latent_dim,
@@ -113,7 +121,7 @@ class LatentForecaster(nn.Module):
         self.alpha_logit = nn.Parameter(torch.tensor(0.0))
 
     def step(self, z: torch.Tensor) -> torch.Tensor:
-        """Residual Euler step: z(k+1) = z(k) + alpha * Spatial(z(k))."""
+        
         a = torch.sigmoid(self.alpha_logit)
         return z + a * self.spatial.propagate(z)
 
@@ -140,6 +148,11 @@ class LatentForecaster(nn.Module):
         z_for_A = z_t.reshape(B * z_t.shape[1], C, L)
         A_seq = self.spatial.attn(z_for_A).view(B, z_t.shape[1], C, C)
 
+        phase_logit = None
+        if self.use_phase_loss:
+            z_global = z_t[:, -1].mean(dim=1)
+            phase_logit = self.phase_head(z_global).squeeze(-1)
+
         return dict(
             pred=pred,
             in_window_pred=in_window_pred,
@@ -148,6 +161,7 @@ class LatentForecaster(nn.Module):
             z_last=z_t[:, -1],
             A_seq=A_seq,
             A_last=A_last,
+            phase_logit=phase_logit,
             **{k: v for k, v in vae_out.items() if k != "z"},
         )
 

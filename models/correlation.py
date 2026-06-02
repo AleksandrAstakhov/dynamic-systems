@@ -5,7 +5,6 @@ import torch.nn as nn
 
 
 def empirical_correlation(x: torch.Tensor | "ndarray") -> torch.Tensor:
-    """x: [T, C] (numpy or torch) -> Pearson correlation [C, C]."""
     if not isinstance(x, torch.Tensor):
         x = torch.as_tensor(x, dtype=torch.float32)
     x = x - x.mean(dim=0, keepdim=True)
@@ -15,20 +14,6 @@ def empirical_correlation(x: torch.Tensor | "ndarray") -> torch.Tensor:
 
 
 class CorrelationSpatial(nn.Module):
-    """A is a fixed [C, C] matrix derived from the data correlation.
-
-    A learnable scalar `gain` allows the optimizer to scale the matrix
-    (so this baseline is not unfairly handicapped by the absolute scale
-    of correlation). A learnable bias per sensor is added too.
-
-    Note: the empirical correlation matrix can have spectral radius
-    far above 1 (up to C for fully correlated sensors). Applying it
-    directly inside the rollout (1-alpha)*I + alpha*gain*A leads to
-    immediate numerical blowup at training start. We therefore
-    normalize the matrix to spectral radius 1 before storing it;
-    the learnable `gain` keeps the same expressive scale as before.
-    """
-
     def __init__(
         self,
         num_channels: int,

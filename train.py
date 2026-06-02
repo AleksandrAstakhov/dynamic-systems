@@ -46,7 +46,6 @@ class WindowDataset(Dataset):
 
 
 def _base(model):
-    """Unwrap DataParallel if applied."""
     return model.module if isinstance(model, torch.nn.DataParallel) else model
 
 

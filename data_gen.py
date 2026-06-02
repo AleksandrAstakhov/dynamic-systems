@@ -12,7 +12,6 @@ def signed_ring_dist(C: int) -> np.ndarray:
 
 
 def make_T(v: float, C: int, ell: float, alpha: float) -> np.ndarray:
-    """First row of circulant T_t: alpha*delta + (1-alpha) * Gaussian peak at v."""
     sd = signed_ring_dist(C)
     g = np.exp(-((sd - v) ** 2) / (2 * ell**2))
     g = g / g.sum() * (1 - alpha)
@@ -58,21 +57,6 @@ def load_eeg(
     max_seconds: float | None = None,
     verbose: bool = False,
 ) -> tuple[np.ndarray, float, list[str]]:
-    """Load PhysioNet motor-imagery EEG via MNE.
-
-    Channels: 64 standard 10-10 EEG montage. We concatenate runs to get a
-    long single-subject recording. Standard preprocessing: bandpass filter,
-    downsample to `sfreq_target` Hz, z-score per channel.
-
-    Runs 4, 8, 12 are motor-imagery (left/right hand). This gives non-
-    stationary connectivity (rest vs. left vs. right imagery), which is
-    *exactly* the kind of regime switching our phase-MHA should pick up.
-
-    Returns:
-        x        : [T, C] float32
-        dt       : float (seconds, = 1 / sfreq_target)
-        ch_names : list[str]
-    """
     import mne
     from mne.datasets import eegbci
     from mne.io import concatenate_raws, read_raw_edf

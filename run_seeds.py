@@ -334,7 +334,7 @@ def plot_training_curve_per_model(
     _band(ax, xs, mat, "black", "CI", alpha_fill=0.12)
     ax.set_xlabel("Эпоха", fontsize=10)
     ax.set_ylabel("Val Horizon MSE", fontsize=10)
-    ax.set_title(f"Кривая обучения — {LABELS.get(kind, kind)}", fontsize=11)
+    ax.set_title(f"Кривая обучения -- {LABELS.get(kind, kind)}", fontsize=11)
     ax.legend(fontsize=8)
     ax.grid(alpha=0.35)
     fig.tight_layout()
@@ -465,14 +465,14 @@ def main() -> None:
         for kind in args.spatial:
             for seed in args.seeds:
                 done += 1
-                print(f"\n{'─'*60}")
+                print(f"\n{'-'*60}")
                 print(f"[{done}/{total}]  spatial={kind}  seed={seed}")
-                print(f"{'─'*60}")
+                print(f"{'-'*60}")
                 run_one(kind, seed, out_dir, extra, gpus)
     else:
         print("[skip_train] using existing checkpoints")
 
-    print("\n[aggregate] loading data …")
+    print("\n[aggregate] loading data ...")
     emb = np.load(args.takens)["emb"]
     raw = np.load(args.series, allow_pickle=True)["x"]
 
