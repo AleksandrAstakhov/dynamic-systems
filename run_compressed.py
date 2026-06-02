@@ -150,6 +150,9 @@ def train_one(
         use_phase_loss=True,
     ).to(args.device)
 
+    if args.gpu_ids:
+        model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+
     opt = torch.optim.AdamW(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.CosineAnnealingLR(
         opt, T_max=args.epochs, eta_min=1e-5
@@ -524,7 +527,17 @@ def main():
     )
     ap.add_argument("--results_dir", default="results/compressed")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--gpus", type=str, default="",
+                    help="GPU IDs для DataParallel, через запятую: '0,1,2'")
     args = ap.parse_args()
+
+    if args.gpus:
+        args.gpu_ids = [int(g) for g in args.gpus.split(",")]
+        args.device  = f"cuda:{args.gpu_ids[0]}"
+        print(f"  Multi-GPU: DataParallel на {args.gpu_ids}, device={args.device}")
+    else:
+        args.gpu_ids = []
+
 
     os.makedirs(args.results_dir, exist_ok=True)
 

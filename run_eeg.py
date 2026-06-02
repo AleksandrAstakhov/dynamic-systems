@@ -579,6 +579,9 @@ def main():
                     default=["grand_full", "grand_diff", "correlation"])
     ap.add_argument("--results_dir", default="results/eeg")
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
+    ap.add_argument("--gpus", type=str, default="",
+                    help="GPU IDs для DataParallel, через запятую: '0,1,2'. "
+                         "Если задано - device устанавливается на cuda:gpus[0]")
     ap.add_argument("--n_seeds", type=int, default=5,
                     help="Число сидов для оценки разброса (только init модели)")
     ap.add_argument("--seed", type=int, default=None,
