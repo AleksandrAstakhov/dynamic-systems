@@ -15,7 +15,11 @@ cd "$(dirname "$0")"
 
 PYTHON="${PYTHON:-python}"
 RESULTS="${RESULTS:-results}"
+GPUS="${GPUS:-}"
 MODE="${1:-all}"   # all | drift | eeg
+
+GPUS_ARG=""
+[[ -n "$GPUS" ]] && GPUS_ARG="--gpus $GPUS"
 
 # ─── Проверка окружения ───────────────────────────────────────────────────────
 echo "=== Проверка окружения ==="
@@ -55,7 +59,8 @@ if [[ "$MODE" == "all" || "$MODE" == "drift" ]]; then
         --n_modes 6 \
         --n_seeds 5 --epochs 50 \
         --spatials correlation grand_diff grand_full \
-        --results_dir "$RESULTS/drift_ring"
+        --results_dir "$RESULTS/drift_ring" \
+        $GPUS_ARG
 
     echo ""
     echo "--- Визуализация drift_ring ---"
@@ -114,7 +119,8 @@ if [[ "$MODE" == "all" || "$MODE" == "eeg" ]]; then
         --n_seeds 3 --epochs 50 \
         --batch_size 128 \
         --spatials correlation grand_diff grand_full \
-        --results_dir "$RESULTS/eeg"
+        --results_dir "$RESULTS/eeg" \
+        $GPUS_ARG
 
     echo ""
     echo "--- Визуализация EEG ---"

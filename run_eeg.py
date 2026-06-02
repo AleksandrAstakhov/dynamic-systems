@@ -355,7 +355,7 @@ def make_model(spatial_kind, m_embed, latent_dim, C, n_modes, args,
     sk = {}
     if spatial_kind in ("grand_diff", "grand_full"):
         sk = dict(d_head=latent_dim, n_modes=n_modes, untied=True)
-    return LatentForecaster(
+    model = LatentForecaster(
         m_embed=m_embed,
         latent_dim=latent_dim,
         num_channels=C,
@@ -371,6 +371,9 @@ def make_model(spatial_kind, m_embed, latent_dim, C, n_modes, args,
         deterministic_encoder=args.deterministic_encoder,
         use_phase_loss=has_labels,
     ).to(args.device)
+    if args.gpu_ids:
+        model = torch.nn.DataParallel(model, device_ids=args.gpu_ids)
+    return model
 
 
 def train_one(spatial_kind, m_embed, latent_dim, C, n_modes,
@@ -587,6 +590,13 @@ def main():
                     help="Обрезать данные до N отсчётов (0 = все)")
 
     args = ap.parse_args()
+
+    if args.gpus:
+        args.gpu_ids = [int(g) for g in args.gpus.split(",")]
+        args.device  = f"cuda:{args.gpu_ids[0]}"
+        print(f"  Multi-GPU: DataParallel на {args.gpu_ids}, device={args.device}")
+    else:
+        args.gpu_ids = []
 
     seeds = [args.seed] if args.seed is not None else list(range(args.n_seeds))
 
